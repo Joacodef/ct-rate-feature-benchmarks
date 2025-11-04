@@ -1,0 +1,57 @@
+# @package _global_
+
+# This is the main Hydra configuration file.
+# It defines the default experiment setup.
+
+defaults:
+  - data: default_features
+  - model: linear_probe_visual
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
+
+# Defines paths for data inputs and experiment outputs.
+# 'data_root' should point to the directory containing feature files.
+paths:
+  data_root: "/path/to/ct-rate-features"
+  features_dir: "${paths.data_root}/manifest.csv"
+  output_dir: "outputs/${hydra.job.name}"
+  checkpoint_dir: "${paths.output_dir}/checkpoints/"
+
+# Defines training and evaluation parameters.
+training:
+  seed: 42
+  batch_size: 64
+  num_workers: 8
+  learning_rate: 1e-4
+  max_epochs: 50
+  
+  # Parameters for classification tasks
+  task_type: "classification"
+  
+  # Based on CT-RATE 
+  target_labels: [
+    # "Medical material",
+    "Arterial wall calcification",
+    # "Cardiomegaly",
+    # "Pericardial effusion",
+    # "Coronary artery wall calcification",
+    # "Hiatal hernia",
+    # "Lymphadenopathy",
+    # "Emphysema",
+    "Atelectasis",
+    "Lung nodule",
+    "Lung opacity",
+    "Pulmonary fibrotic sequela",
+    # "Pleural effusion",
+    # "Mosaic attenuation pattern",
+    # "Peribronchial thickening",
+    # "Consolidation",
+    # "Bronchiectasis",
+    # "Interlobular septal thickening",
+  ]
+
+# Configuration for experiment tracking (e.g., W&B, TensorBoard)
+logging:
+  logger_name: "wandb" 
+  project_name: "ct-rate-feature-benchmarks"
+  log_model: false # (e.g., "all", "false")

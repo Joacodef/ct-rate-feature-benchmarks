@@ -1,0 +1,24 @@
+# configs/data/default_features.yaml
+#
+# Configures the data loading for the default experiment.
+# This setup assumes 'visual-only' classification.
+
+# Name of this configuration
+data_config_name: "default_features_visual_only"
+
+# Defines the column names to be read from the manifest file
+# specified in 'paths.feature_manifest'
+columns:
+  
+  # The name of the column in the manifest CSV that contains the
+  # relative path to the pre-computed visual feature file (e.g., 'features/visual/scan_001.pt')
+  visual_feature: "visual_feature_path"
+  
+  # The text feature column is explicitly set to null, as this
+  # default configuration is for visual-only models.
+  text_feature: null
+  
+  # The list of target labels is read directly from the main
+  # config file (training.target_labels). This key confirms
+  # that we are using that list as the source for our label columns.
+  labels: "${training.target_labels}"
