@@ -1,9 +1,8 @@
-
-# 🔧 Configuration (`configs/`)
+# Configuration (configs/)
 
 This directory contains all configuration files for the project, managed by [Hydra](https://hydra.cc/).
 
-The configuration system is designed to be **composable**. The main `config.yaml` file acts as the entry point, which then "pulls in" smaller, swappable configuration pieces from the `data/` and `model/` sub-directories.
+The configuration system is designed to be composable. The main `config.yaml` file acts as the entry point, which then "pulls in" smaller, swappable configuration pieces from the `data/` and `model/` sub-directories.
 
 ## How it Works
 
@@ -13,29 +12,28 @@ The configuration system is designed to be **composable**. The main `config.yaml
     * **`data/`**: Contains `.yaml` files that define *how* to load data (e.g., which features to use, which columns to read).
     * **`model/`**: Contains `.yaml` files that define a specific model's architecture and hyperparameters.
 
-## 🚀 Running Experiments
+## Running Experiments
 
 When you run the main training script, Hydra builds the complete configuration by merging the files.
 
 **Default Run:**
 ```bash
-# This command loads:
+# This command loads the new defaults:
 # 1. config.yaml
 # 2. data/default_features.yaml
-# 3. model/linear_probe_visual.yaml
+# 3. model/mlp_visual.yaml
 python src/ct_rate_benchmarks/train.py
 ````
 
 **Swapping Configurations:**
-The power of this system is in swapping components from the command line. If you create a new model config `model/mlp_visual.yaml`, you can run it without changing any code:
+The power of this system is in swapping components from the command line. If you create a new data config `data/multimodal_features.yaml` and a new model config `model/mlp_multimodal.yaml`, you can run a new experiment without changing any code:
 
 ```bash
 # This command loads:
 # 1. config.yaml
-# 2. data/default_features.yaml
-# 3. model/mlp_visual.yaml  <-- SWAPPED
-python src/ct_rate_benchmarks/train.py model=mlp_visual
+# 2. data/multimodal_features.yaml  <-- SWAPPED
+# 3. model/mlp_multimodal.yaml      <-- SWAPPED
+python src/ct_rate_benchmarks/train.py data=multimodal_features model=mlp_multimodal
 ```
 
 This composable approach allows us to define and benchmark new models or data-handling strategies simply by adding new `.yaml` files.
-

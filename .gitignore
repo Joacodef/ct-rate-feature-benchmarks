@@ -2,3 +2,7 @@
 !.env.example
 
 *code-workspace
+data/*
+
+__pycache__
+.coverage

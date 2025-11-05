@@ -1,65 +1,120 @@
 # CT-RATE Feature Benchmarks
 
-This repository serves as the official benchmarking environment for developing and evaluating downstream models using pre-computed features from the **CT-RATE dataset**.
+Standardized benchmarking environment for training and evaluating downstream models using pre-computed visual (and optionally textual) features derived from CT chest scans and paired reports. This repo focuses on modeling with pre-extracted embeddings; it does not perform raw 3D image preprocessing.
 
-[cite_start]The goal of this project is to provide a standardized framework for testing various machine learning models on high-quality, pre-extracted visual and textual embeddings derived from the CT-RATE dataset's 3D chest CT scans and paired radiology reports[cite: 2, 4, 15].
-
-## 🎯 Project Objectives
-
-This repository is *not* intended for 3D image processing or feature extraction. Instead, it focuses on the subsequent modeling tasks:
-
-1.  **Visual-Only Classification:** Training and evaluating models (e.G., MLPs, linear probes) that use only the pre-computed 3D visual features as input.
-2.  [cite_start]**Text-Only Classification:** Training and evaluating models that use only the pre-computed report embeddings (from findings and impressions sections)[cite: 18].
-3.  [cite_start]**Multimodal Retrieval:** Benchmarking text-to-image and image-to-image retrieval tasks using the aligned latent spaces[cite: 23, 24, 25].
-4.  **Configuration-Driven Experiments:** All experiments are managed via configuration files (Hydra) to ensure reproducibility.
-
-## 🗂️ Repository Structure
-
-The repository follows a standard layout for reproducible machine learning projects:
+## Repository structure
 
 ```
-
 ct-rate-feature-benchmarks/
-├── configs/               \# Hydra configuration files for experiments
-├── data/                  \# (Placeholder) Local storage for feature files/manifests
-├── notebooks/             \# Jupyter notebooks for exploration and analysis
-├── scripts/               \# Standalone scripts (e.g., data prep, batch runs)
-├── src/                   \# Main source code
-│   ├── ct\_rate\_benchmarks/  \# Core project package
-│   │   ├── data/          \# Dataloaders and feature manifest handling
-│   │   ├── models/        \# Model definitions (classifiers, retrieval)
-│   │   └── train.py       \# Main training script
-├── tests/                 \# Pytest unit and integration tests
-├── pyproject.toml         \# Project metadata and dependencies (for uv)
-└── README.md              \# This file
+├─ configs/                # Hydra configuration (main config.yaml plus data/ and model/)
+│  ├─ config.yaml
+│  ├─ data/
+│  │  └─ default_features.yaml
+│  └─ model/
+│     └─ mlp_visual.yaml
+├─ data/                   # Local datasets area (features, manifests, labels, etc.)
+│  ├─ features/
+│  │  ├─ image/            # NPZ feature files (example: train_*.npz)
+│  │  └─ text/             # (optional) text feature files
+│  ├─ labels/
+│  ├─ manifests/           # CSV manifests used by training (train.csv, valid.csv, tests)
+│  ├─ splits/              # Predefined split CSVs
+│  ├─ metadata/
+│  └─ radiology_text_reports/
+├─ scripts/
+│  └─ prepare_manifests.py
+├─ src/
+│  └─ ct_rate_benchmarks/
+│     ├─ data/
+│     ├─ models/
+│     └─ train.py          # Hydra-configured training entry point
+├─ tests/
+│  └─ unit/test_train_pipeline.py
+├─ pyproject.toml
+└─ README.md
+```
 
-````
+## Installation
 
-## 🚀 Getting Started
+Use a virtual environment and install the project in editable mode from the repository root.
 
-### 1. Environment Setup (using uv)
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install -e .
+```
 
-This project uses `uv` for package management.
+## Running training
 
-```bash
-# Create a virtual environment
-python -m venv .venv
-source .venv/bin/activate
+Training is configured with Hydra. The entry point is `ct_rate_benchmarks.train`, which loads `configs/config.yaml` by default. Run from the repository root so relative config paths resolve correctly.
 
-# Install all dependencies (including dev and test)
-uv pip install -e ".[dev,test]"
-````
+```powershell
+python -m ct_rate_benchmarks.train
+```
 
-### 2\. (Next Steps)
+Override configuration values on the command line as needed, for example to change the batch size, epochs, or point to your features root:
 
-  * Download pre-computed features (instructions to be added).
-  * Run experiments using the training scripts (instructions to be added).
+```powershell
+python -m ct_rate_benchmarks.train training.batch_size=64 training.max_epochs=10 paths.data_root="E:/ct-rate-feature-benchmarks/data/features"
+```
 
-## 📚 Background: CT-RATE and CT-CLIP
+Key behaviors (from `src/ct_rate_benchmarks/train.py`):
 
-The features used in this repository originate from the CT-CLIP model, which was trained on the CT-RATE dataset.
+- Loads manifests from `paths.manifest_dir` (default: `data/manifests`) using `FeatureDataset`.
+- Resolves label count from `training.target_labels`.
+- Instantiates the model via Hydra (see `configs/model/mlp_visual.yaml`).
+- Trains with BCEWithLogitsLoss and reports AUROC (macro) on validation and test sets.
+- Saves a checkpoint to `paths.checkpoint_dir` (default: `outputs/${hydra.job.name}/checkpoints/final_model.pt`).
 
-  * [cite\_start]**CT-RATE Dataset:** A large-scale, multimodal dataset of **25,692 non-contrast 3D chest CT scans** paired with their corresponding radiology reports[cite: 3, 4]. [cite\_start]It includes 18 global abnormality labels for validation[cite: 10].
-  * [cite\_start]**CT-CLIP Model:** A foundational contrastive learning model that aligns 3D CT volumes and text reports into a shared embedding space[cite: 15]. [cite\_start]This model is capable of powerful zero-shot classification and case retrieval[cite: 19, 23].
+## Configuration
 
-This repository utilizes the embeddings generated by CT-CLIP as the *input* for downstream tasks.
+Top-level config: `configs/config.yaml`.
+
+- paths
+  - `data_root`: root folder containing feature subfolders such as `features/image/` and `features/text/`.
+  - `manifest_dir`: directory holding split manifests (e.g., `data/manifests`).
+  - `output_dir`, `checkpoint_dir`: output and checkpoint locations.
+- data
+  - `train_manifest`, `val_manifest`, `test_manifests`: filenames inside `paths.manifest_dir`.
+- training
+  - `batch_size`, `num_workers`, `learning_rate`, `max_epochs`.
+  - `loss`: default `torch.nn.BCEWithLogitsLoss`.
+  - `target_labels`: list of label column names expected in the manifests.
+- model
+  - See `configs/model/mlp_visual.yaml` with `_target_` = `ct_rate_benchmarks.models.mlp.MLP` and constructor `params` (e.g., `in_features`, `hidden_dims`, `dropout`).
+
+Data manifest expectations (see `configs/data/default_features.yaml`):
+
+- Column `visual_feature_path` stores the relative path to each sample’s visual feature file, relative to `paths.data_root`.
+- Label columns must match `training.target_labels`.
+- Text feature support is optional and disabled by default (`text_feature: null`).
+
+## Data layout
+
+Place your precomputed features under `paths.data_root`. A common layout is:
+
+```
+<paths.data_root>/
+├─ image/           # e.g., *.npz files with visual embeddings
+└─ text/            # (optional) text embeddings
+```
+
+Provide split manifests in `paths.manifest_dir` (defaults to `data/manifests`):
+
+- `train.csv`, `valid.csv`
+- `test_manual_all.csv`, `test_manual_train.csv`, `test_manual_valid.csv`
+
+The repository includes helper data and scripts under `data/` and `scripts/` for preparing and inspecting manifests (see `scripts/prepare_manifests.py`).
+
+## Testing
+
+Run the test suite from the repository root:
+
+```powershell
+pytest -q
+```
+
+## Notes
+
+- Python 3.8+ is recommended.
+- CUDA is used automatically when available.
+- For guidance on the package internals, see `src/ct_rate_benchmarks/README.md`.

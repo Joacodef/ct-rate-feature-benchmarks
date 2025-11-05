@@ -1,0 +1,32 @@
+# configs/model/mlp_visual.yaml
+#
+# Configures a Multi-Layer Perceptron (MLP) classifier.
+# This model uses only visual features as input.
+
+# The _target_ specifies the full Python path to the class to instantiate.
+_target_: "ct_rate_benchmarks.models.mlp.MLP"
+
+# Name of this model configuration (metadata, not passed to class)
+model_name: "mlp_visual"
+
+# --- NEW: Constructor arguments are nested ---
+# These keys MUST match the arguments in MLP.__init__
+params:
+  # Input feature dimension.
+  # This must match the dimensionality of the pre-computed
+  # visual embeddings (e.g., 512, 768, 1024).
+  # This value is inherited from the linear probe config.
+  in_features: 512
+
+  # A list of hidden layer dimensions.
+  # This example defines two hidden layers:
+  # 1st: 512 -> 256
+  # 2nd: 256 -> 128
+  hidden_dims: [256, 128]
+
+  # Dropout probability to apply after each hidden layer
+  dropout: 0.25
+
+# Note: The 'out_features' (number of labels) is not defined here.
+# The training script will add it dynamically based on the
+# 'training.target_labels' list from config.yaml.

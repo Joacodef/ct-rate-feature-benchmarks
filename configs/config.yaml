@@ -5,21 +5,37 @@
 
 defaults:
   - data: default_features
-  - model: linear_probe_visual
+  - model: mlp_visual 
   - override hydra/job_logging: colorlog
   - override hydra/hydra_logging: colorlog
 
 # Defines paths for data inputs and experiment outputs.
-# 'data_root' should point to the directory containing feature files.
 paths:
-  data_root: "/path/to/ct-rate-features"
-  features_dir: "${paths.data_root}/manifest.csv"
+  # --- IMPORTANT ---
+  # This path MUST point to the root directory where your
+  # feature sub-folders (e.g., 'image/', 'text/') are located.
+  data_root: "/data/features"
+
+  # Path to the directory where new manifests are stored
+  manifest_dir: "data/manifests"
+  
+  # Experiment output paths
   output_dir: "outputs/${hydra.job.name}"
   checkpoint_dir: "${paths.output_dir}/checkpoints/"
 
+# NEW: Defines the manifest filenames for each data split
+# These files are expected inside 'paths.manifest_dir'
+data:
+  train_manifest: "train.csv"
+  val_manifest: "valid.csv"
+  # A list of test manifests to evaluate on
+  test_manifests:
+    - "test_manual_all.csv"
+    - "test_manual_train.csv"
+    - "test_manual_valid.csv"
+
 # Defines training and evaluation parameters.
 training:
-  seed: 42
   batch_size: 64
   num_workers: 8
   learning_rate: 1e-4
@@ -27,6 +43,10 @@ training:
   
   # Parameters for classification tasks
   task_type: "classification"
+  
+  # Loss function configuration
+  loss:
+    _target_: "torch.nn.BCEWithLogitsLoss"
   
   # Based on CT-RATE 
   target_labels: [
@@ -49,6 +69,10 @@ training:
     # "Bronchiectasis",
     # "Interlobular septal thickening",
   ]
+
+# NEW: Utility and reproducibility configuration
+utils:
+  seed: 42
 
 # Configuration for experiment tracking (e.g., W&B, TensorBoard)
 logging:

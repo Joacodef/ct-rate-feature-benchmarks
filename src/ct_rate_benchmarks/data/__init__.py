@@ -8,7 +8,6 @@ and dataset definitions for the CT-RATE feature benchmarks.
 """
 
 # Expose the main Dataset class for easier access
-# (This line will be uncommented once dataset.py is created)
-# from .dataset import FeatureDataset
+from .dataset import FeatureDataset
 
-# __all__ = ["FeatureDataset"]
+__all__ = ["FeatureDataset"]
