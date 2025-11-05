@@ -10,6 +10,7 @@ import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from . import data  
 from . import models 
@@ -96,7 +97,9 @@ def train_epoch(
     total_loss = 0.0
     
     # Iterate over the training data
-    for batch in dataloader:
+    # Wrap dataloader with tqdm to show a progress bar per batch
+    train_iter = tqdm(dataloader, desc="Train", unit="batch")
+    for batch in train_iter:
         # 1. Get data and move to device
         # We only use visual features for this model
         features = batch["visual_features"].to(device)
@@ -119,6 +122,12 @@ def train_epoch(
         
         # 7. Update total loss
         total_loss += loss.item()
+        # Update progress bar with current loss
+        try:
+            train_iter.set_postfix(train_loss=f"{loss.item():.4f}")
+        except Exception:
+            # If tqdm can't be updated for any reason, ignore
+            pass
 
     # Calculate and return the average loss for the epoch
     avg_loss = total_loss / len(dataloader)
@@ -156,7 +165,9 @@ def evaluate_epoch(
     all_labels = []
 
     # Iterate over the data
-    for batch in dataloader:
+    # Use tqdm for evaluation progress as well
+    eval_iter = tqdm(dataloader, desc="Eval", unit="batch")
+    for batch in eval_iter:
         # 1. Get data and move to device
         features = batch["visual_features"].to(device)
         labels = batch["labels"].to(device)
@@ -173,6 +184,11 @@ def evaluate_epoch(
         # 5. Store predictions and labels for metrics
         all_preds.append(preds)
         all_labels.append(labels)
+        # Update progress bar with current eval loss
+        try:
+            eval_iter.set_postfix(eval_loss=f"{loss.item():.4f}")
+        except Exception:
+            pass
 
     # Calculate the average loss for the epoch
     avg_loss = total_loss / len(dataloader)

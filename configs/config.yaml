@@ -6,15 +6,15 @@
 defaults:
   - data: default_features
   - model: mlp_visual 
-  - override hydra/job_logging: colorlog
-  - override hydra/hydra_logging: colorlog
+  - override hydra/job_logging: default
+  - override hydra/hydra_logging: default
 
 # Defines paths for data inputs and experiment outputs.
 paths:
   # --- IMPORTANT ---
   # This path MUST point to the root directory where your
   # feature sub-folders (e.g., 'image/', 'text/') are located.
-  data_root: "/data/features"
+  data_root: "data/features"
 
   # Path to the directory where new manifests are stored
   manifest_dir: "data/manifests"

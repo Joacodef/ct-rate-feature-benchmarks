@@ -29,7 +29,10 @@ def generate_path(volumename: str, prefix: str, suffix: str) -> str:
     # Ensure prefix ends with a slash if it's not empty
     if prefix and not prefix.endswith(("/")):
         prefix = f"{prefix}/"
-        
+    # Ensure suffix starts with a dot
+    if suffix and not suffix.startswith("."):
+        suffix = f".{suffix}"
+
     return f"{prefix}{volumename}{suffix}"
 
 
@@ -138,14 +141,14 @@ def create_manifest(args):
     
     # Generate Visual Path
     merged_df[args.visual_path_col] = merged_df["volumename"].apply(
-        lambda x: generate_path(x, args.visual_prefix, ".pt")
+        lambda x: generate_path(x, args.visual_prefix, args.visual_suffix if hasattr(args, 'visual_suffix') else ".pt")
     )
 
     # Generate Text Path (if text prefix is provided)
     if args.text_prefix:
         log.info(f"Generating single text path with prefix: {args.text_prefix}")
         merged_df[args.text_path_col] = merged_df["volumename"].apply(
-            lambda x: generate_path(x, args.text_prefix, ".pt")
+            lambda x: generate_path(x, args.text_prefix, args.text_suffix if hasattr(args, 'text_suffix') else ".pt")
         )
 
     # --- 6. Finalize Columns ---
@@ -228,6 +231,12 @@ def main():
         default="visual_feature_path",
         help="Column name for the generated visual path.",
     )
+    parser.add_argument(
+        "--visual_suffix",
+        type=str,
+        default=".pt",
+        help="File suffix/extension to use for visual features (e.g., '.pt' or '.npz').",
+    )
     
     # --- Text Path Generation (Single) ---
     parser.add_argument(
@@ -241,6 +250,12 @@ def main():
         type=str,
         default="text_feature_path",
         help="Column name for the generated text path.",
+    )
+    parser.add_argument(
+        "--text_suffix",
+        type=str,
+        default=".pt",
+        help="File suffix/extension to use for text features (e.g., '.pt' or '.npz').",
     )
     
     args = parser.parse_args()

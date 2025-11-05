@@ -88,3 +88,34 @@ def test_returns_expected_item(tmp_path: Path) -> None:
     assert torch.equal(item["text_features"], text_tensor)
     assert item["labels"].tolist() == [0.0, 1.0]
     assert len(dataset) == 1
+
+
+def test_loads_npz_feature(tmp_path: Path) -> None:
+    """Ensure FeatureDataset can read .npz feature files and return tensors."""
+    data_root = tmp_path / "root"
+    feature_dir = data_root / "features"
+    feature_dir.mkdir(parents=True)
+
+    visual_arr = (torch.randn(6).numpy())
+    # Save as .npz
+    npz_path = feature_dir / "visual_npz.npz"
+    import numpy as _np
+
+    _np.savez(npz_path, visual_arr)
+
+    manifest_path = tmp_path / "manifest_npz.csv"
+    pd.DataFrame({
+        "visual": ["features/visual_npz.npz"],
+        "label_a": [1],
+    }).to_csv(manifest_path, index=False)
+
+    dataset = FeatureDataset(
+        manifest_path=str(manifest_path),
+        data_root=str(data_root),
+        target_labels=["label_a"],
+        visual_feature_col="visual",
+    )
+
+    item = dataset[0]
+    assert torch.allclose(item["visual_features"], torch.tensor(visual_arr, dtype=torch.float32))
+    assert item["labels"].tolist() == [1.0]
