@@ -6,6 +6,9 @@
 # Name of this configuration
 data_config_name: "default_features_visual_only"
 
+# Toggle in-memory preloading of features before training starts.
+preload_features: true
+
 # Defines the column names to be read from the manifest file
 # specified in 'paths.feature_manifest'
 columns:

@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
+from omegaconf.errors import InterpolationKeyError
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -241,6 +242,16 @@ def train_model(cfg: DictConfig) -> float:
     # --- 3. Load Data ---
     log.info(f"Loading data from data_root: {cfg.paths.data_root}")
     
+    preload_features = OmegaConf.select(cfg, "data.preload_features", default=False)
+    if preload_features:
+        log.info("Dataset preloading enabled; features will be loaded into RAM prior to training.")
+        if cfg.training.num_workers > 0:
+            log.warning(
+                "Preloading with num_workers=%d will replicate the dataset per worker. "
+                "Consider setting num_workers=0 if memory becomes an issue.",
+                cfg.training.num_workers,
+            )
+
     # Common dataset args
     dataset_args = {
         "data_root": cfg.paths.data_root,
@@ -248,6 +259,7 @@ def train_model(cfg: DictConfig) -> float:
         "visual_feature_col": cfg.data.columns.visual_feature,
         # We are only doing visual, so text_feature_col is None
         "text_feature_col": cfg.data.columns.text_feature,
+        "preload": bool(preload_features),
     }
     
     # Common dataloader args
@@ -358,8 +370,18 @@ def train_model(cfg: DictConfig) -> float:
         final_metrics[f"test_{test_name}_auroc"] = test_metrics["auroc"]
     
     # --- 9. Save Artifacts ---
-    os.makedirs(cfg.paths.checkpoint_dir, exist_ok=True)
-    checkpoint_path = os.path.join(cfg.paths.checkpoint_dir, "final_model.pt")
+    try:
+        checkpoint_dir = os.path.normpath(cfg.paths.checkpoint_dir)
+    except (InterpolationKeyError, AttributeError):
+        job_name = OmegaConf.select(cfg, "hydra.job.name", default="manual_run")
+        checkpoint_dir = os.path.normpath(os.path.join("outputs", job_name, "checkpoints"))
+        log.warning(
+            "hydra.job.name not available; falling back to checkpoint directory: %s",
+            checkpoint_dir,
+        )
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_path = os.path.join(checkpoint_dir, "final_model.pt")
     torch.save(model.state_dict(), checkpoint_path)
     log.info(f"Final model checkpoint saved to: {checkpoint_path}")
 

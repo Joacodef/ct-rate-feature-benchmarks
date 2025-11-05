@@ -4,10 +4,11 @@ import logging
 import os
 from typing import Dict, List, Optional, Union
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import Dataset
+from tqdm.auto import tqdm
 
 # Initialize a logger for this module
 log = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ class FeatureDataset(Dataset):
         target_labels: List[str],
         visual_feature_col: Optional[str] = None,
         text_feature_col: Optional[str] = None,
+        preload: bool = False,
     ):
         """
         Initializes the dataset.
@@ -44,6 +46,8 @@ class FeatureDataset(Dataset):
             text_feature_col: The column name in the manifest that
                               contains the relative path to the
                               text feature file (e.g., .pt).
+            preload: If True, eagerly load all features and labels
+                     into memory during initialisation.
         """
         super().__init__()
 
@@ -60,6 +64,10 @@ class FeatureDataset(Dataset):
         self.target_labels = target_labels
         self.visual_feature_col = visual_feature_col
         self.text_feature_col = text_feature_col
+        self._preload_enabled = bool(preload)
+        self._visual_cache: Optional[List[torch.Tensor]] = None
+        self._text_cache: Optional[List[torch.Tensor]] = None
+        self._label_cache: Optional[List[torch.Tensor]] = None
 
         # Load the manifest into a pandas DataFrame
         try:
@@ -70,6 +78,9 @@ class FeatureDataset(Dataset):
 
         # Validate that required columns exist
         self._validate_columns()
+
+        if self._preload_enabled:
+            self._preload_to_memory()
 
     def _validate_columns(self):
         """
@@ -97,18 +108,45 @@ class FeatureDataset(Dataset):
         """Returns the total number of samples in the dataset."""
         return len(self.manifest)
 
-    def _load_feature(self, relative_path: str) -> torch.Tensor:
-        """
-        Loads a feature tensor from a file.
+    def _preload_to_memory(self) -> None:
+        """Read all configured features and labels into RAM upfront."""
+        total = len(self.manifest)
+        log.info(
+            "Preloading %d samples from %s into memory.",
+            total,
+            self.manifest_path,
+        )
 
-        Args:
-            relative_path: The relative path to the feature file
-                           (e.g., 'features/scan_001.pt').
+        if self.visual_feature_col:
+            self._visual_cache = [None] * total
+        if self.text_feature_col:
+            self._text_cache = [None] * total
+        self._label_cache = [None] * total
 
-        Returns:
-            The loaded feature as a torch.Tensor.
-        """
-        
+        progress = tqdm(
+            range(total),
+            desc=f"Preloading {os.path.basename(self.manifest_path)}",
+            unit="sample",
+            leave=False,
+        )
+
+        for idx in progress:
+            row = self.manifest.iloc[idx]
+
+            if self.visual_feature_col:
+                visual_path = row[self.visual_feature_col]
+                self._visual_cache[idx] = self._load_feature(visual_path)
+
+            if self.text_feature_col:
+                text_path = row[self.text_feature_col]
+                self._text_cache[idx] = self._load_feature(text_path)
+
+            labels = row[self.target_labels].values.astype(float)
+            self._label_cache[idx] = torch.tensor(labels, dtype=torch.float32)
+
+        progress.close()
+        log.info("Finished preloading dataset into memory.")
+
     def _load_feature(self, relative_path: str) -> torch.Tensor:
         """Load a feature tensor from a file, supporting .pt, .npy, and .npz.
 
@@ -296,18 +334,27 @@ class FeatureDataset(Dataset):
 
         # Load Visual Feature if configured
         if self.visual_feature_col:
-            visual_path = sample_row[self.visual_feature_col]
-            output_item["visual_features"] = self._load_feature(visual_path)
+            if self._visual_cache is not None:
+                output_item["visual_features"] = self._visual_cache[index]
+            else:
+                visual_path = sample_row[self.visual_feature_col]
+                output_item["visual_features"] = self._load_feature(visual_path)
 
         # Load Text Feature if configured
         if self.text_feature_col:
-            text_path = sample_row[self.text_feature_col]
-            output_item["text_features"] = self._load_feature(text_path)
+            if self._text_cache is not None:
+                output_item["text_features"] = self._text_cache[index]
+            else:
+                text_path = sample_row[self.text_feature_col]
+                output_item["text_features"] = self._load_feature(text_path)
 
         # Load Labels
         # Extract label values and convert to a float tensor
         # Assumes labels are numeric (0 or 1)
-        labels = sample_row[self.target_labels].values.astype(float)
-        output_item["labels"] = torch.tensor(labels, dtype=torch.float32)
+        if self._label_cache is not None:
+            output_item["labels"] = self._label_cache[index]
+        else:
+            labels = sample_row[self.target_labels].values.astype(float)
+            output_item["labels"] = torch.tensor(labels, dtype=torch.float32)
 
         return output_item
