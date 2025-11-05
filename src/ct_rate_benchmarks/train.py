@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import copy
 from typing import Dict, List, Tuple
 
 import hydra
@@ -324,6 +325,15 @@ def train_model(cfg: DictConfig) -> float:
 
     # --- 7. Run Training Loop ---
     log.info(f"Starting training for {cfg.training.max_epochs} epochs.")
+
+    # Early stopping parameters
+    patience = OmegaConf.select(
+        cfg, "training.early_stopping_patience", default=10
+    )
+    log.info(f"Early stopping patience set to {patience} epochs.")
+    epochs_no_improve = 0
+    best_val_auroc = 0.0
+    best_model_state = None
     
     best_val_auroc = 0.0
 
@@ -347,10 +357,25 @@ def train_model(cfg: DictConfig) -> float:
             f"Val Loss: {val_loss:.4f} | "
             f"Val AUROC: {val_auroc:.4f}"
         )
-        
-        # TODO: Implement proper best model saving
+
+        # --- Early Stopping Check ---
         if val_auroc > best_val_auroc:
             best_val_auroc = val_auroc
+            epochs_no_improve = 0
+            # Store the state of the best performing model
+            best_model_state = copy.deepcopy(model.state_dict())
+            log.debug(f"New best val AUROC: {best_val_auroc:.4f}. Resetting patience.")
+        else:
+            epochs_no_improve += 1
+            log.debug(f"Val AUROC did not improve. Patience: {epochs_no_improve}/{patience}")
+
+        # Check if patience has been exceeded
+        if epochs_no_improve >= patience:
+            log.info(
+                f"Early stopping triggered after {patience} epochs "
+                f"without improvement. Best Val AUROC: {best_val_auroc:.4f}"
+            )
+            break
 
     log.info("Training complete.")
 
@@ -382,8 +407,21 @@ def train_model(cfg: DictConfig) -> float:
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_path = os.path.join(checkpoint_dir, "final_model.pt")
-    torch.save(model.state_dict(), checkpoint_path)
-    log.info(f"Final model checkpoint saved to: {checkpoint_path}")
+
+    # Save the best model state captured during training
+    if best_model_state:
+        torch.save(best_model_state, checkpoint_path)
+        log.info(
+            f"Best model checkpoint (Val AUROC: {best_val_auroc:.4f}) "
+            f"saved to: {checkpoint_path}"
+        )
+    else:
+        # Fallback: Save final model if training ended early or no improvement
+        torch.save(model.state_dict(), checkpoint_path)
+        log.warning(
+            f"Final model checkpoint saved to: {checkpoint_path} "
+            "(No validation improvement was captured)"
+        )
 
     # Return the best validation metric
     return best_val_auroc

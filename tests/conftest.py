@@ -83,6 +83,7 @@ def mock_cfg(mock_data_path: Path) -> DictConfig:
                 f"training.batch_size={MOCK_BATCH_SIZE}",
                 "training.num_workers=0",
                 f"training.target_labels=[{','.join([f'label_{j}' for j in range(MOCK_NUM_LABELS)])}]",
+                "training.early_stopping_patience=2",
                 "model=mlp_visual",
                 f"model.params.in_features={MOCK_IN_FEATURES}",
                 "model.params.hidden_dims=[4]",

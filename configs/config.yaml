@@ -26,7 +26,7 @@ paths:
 # NEW: Defines the manifest filenames for each data split
 # These files are expected inside 'paths.manifest_dir'
 data:
-  train_manifest: "train.csv"
+  train_manifest: "train_tiny.csv"
   val_manifest: "valid.csv"
   # A list of test manifests to evaluate on
   test_manifests:
@@ -39,14 +39,15 @@ training:
   batch_size: 64
   num_workers: 0 # Recommended to be 0
   learning_rate: 1e-4
-  max_epochs: 50
+  max_epochs: 5000
+  early_stopping_patience: 50
   
   # Parameters for classification tasks
   task_type: "classification"
   
   # Loss function configuration
   loss:
-    _target_: "torch.nn.BCEWithLogitsLoss"
+    _target_: "torch.nn.BCEWithLogitsLoss"  
   
   # Based on CT-RATE 
   target_labels: [
