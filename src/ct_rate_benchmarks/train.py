@@ -1,7 +1,10 @@
+import json
 import logging
 import os
 import random
 import copy
+from hydra.core.hydra_config import HydraConfig
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import hydra
@@ -215,9 +218,9 @@ def train_model(cfg: DictConfig) -> float:
     2. Loads and prepares datasets and dataloaders.
     3. Initializes the model architecture.
     4. Initializes the optimizer and loss function.
-    5. Runs the training loop for the specified number of epochs.
-    6. Runs the final evaluation on the test set.
-    7. Logs metrics and saves artifacts.
+    5. Runs the training loop with validation.
+    6. Logs metrics during training.
+    7. Saves artifacts.
 
     Args:
         cfg: The Hydra configuration object.
@@ -286,17 +289,6 @@ def train_model(cfg: DictConfig) -> float:
     dataloader_val = DataLoader(dataset_val, shuffle=False, **loader_args)
     log.info(f"Loaded validation data from: {val_manifest_path}")
     
-    # Instantiate Test Loaders
-    test_loaders = []
-    for test_manifest in cfg.data.test_manifests:
-        test_manifest_path = os.path.normpath(
-            os.path.join(cfg.paths.manifest_dir, test_manifest)
-        )
-        dataset_test = FeatureDataset(manifest_path=test_manifest_path, **dataset_args)
-        dataloader_test = DataLoader(dataset_test, shuffle=False, **loader_args)
-        test_loaders.append((test_manifest, dataloader_test))
-        log.info(f"Loaded test data from: {test_manifest_path}")
-
     # --- 4. Initialize Model ---
     # We can now safely log the model_name from the config
     log.info(f"Instantiating model: {cfg.model.model_name}") 
@@ -335,8 +327,6 @@ def train_model(cfg: DictConfig) -> float:
     best_val_auroc = 0.0
     best_model_state = None
     
-    best_val_auroc = 0.0
-
     for epoch in range(1, cfg.training.max_epochs + 1):
         
         # Run one epoch of training
@@ -379,22 +369,7 @@ def train_model(cfg: DictConfig) -> float:
 
     log.info("Training complete.")
 
-    # --- 8. Run Final Evaluation ---
-    log.info("Running final evaluation on test sets...")
-    
-    final_metrics = {}
-    for test_name, test_loader in test_loaders:
-        test_loss, test_metrics = evaluate_epoch(
-            model, test_loader, criterion, device
-        )
-        log.info(
-            f"Test Set: {test_name} | "
-            f"Test Loss: {test_loss:.4f} | "
-            f"Test AUROC: {test_metrics['auroc']:.4f}"
-        )
-        final_metrics[f"test_{test_name}_auroc"] = test_metrics["auroc"]
-    
-    # --- 9. Save Artifacts ---
+    # --- 8. Save Artifacts ---
     try:
         checkpoint_dir = os.path.normpath(cfg.paths.checkpoint_dir)
     except (InterpolationKeyError, AttributeError):
@@ -423,6 +398,40 @@ def train_model(cfg: DictConfig) -> float:
             "(No validation improvement was captured)"
         )
 
+    # --- 9. Update Latest Run Pointer ---
+    pointer_path_str = OmegaConf.select(cfg, "paths.latest_run_pointer")
+    if pointer_path_str:
+        try:
+            original_cwd = OmegaConf.select(cfg, "hydra.runtime.cwd", default=os.getcwd())
+            pointer_path = Path(original_cwd) / Path(os.path.normpath(pointer_path_str))
+            pointer_path.parent.mkdir(parents=True, exist_ok=True)
+
+            run_dir_cfg = OmegaConf.select(cfg, "paths.run_dir", default=None)
+            if run_dir_cfg:
+                run_dir = Path(os.path.normpath(run_dir_cfg))
+                if not run_dir.is_absolute():
+                    run_dir = Path(original_cwd) / run_dir
+            else:
+                try:
+                    run_dir = Path(HydraConfig.get().runtime.output_dir)
+                except Exception:
+                    run_dir = Path(checkpoint_dir).parent
+            run_dir = run_dir.resolve()
+            payload = {
+                "run_dir": str(run_dir),
+                "checkpoint": str(Path(checkpoint_path).resolve()),
+                "best_val_auroc": float(best_val_auroc),
+            }
+
+            pointer_path.write_text(json.dumps(payload, indent=2))
+            log.info("Latest run pointer updated: %s", pointer_path)
+        except Exception as exc:
+            log.warning(
+                "Unable to update latest run pointer at %s: %s",
+                pointer_path_str,
+                exc,
+            )
+
     # Return the best validation metric
     return best_val_auroc
 
@@ -438,6 +447,37 @@ def main(cfg: DictConfig) -> None:
         cfg: The Hydra configuration object automatically populated.
     """
     try:
+        # Enforce that a hydra job name is provided so runs are named and
+        # artifacts are stored predictably. This prevents accidental
+        # unlabelled runs that drop into the `manual_run` fallback.
+        job_name_candidates: List[str] = []
+
+        env_job_name = os.environ.get("HYDRA_JOB_NAME")
+        if env_job_name:
+            job_name_candidates.append(env_job_name)
+
+        cfg_job_name = OmegaConf.select(cfg, "hydra.job.name", default=None)
+        if cfg_job_name:
+            job_name_candidates.append(cfg_job_name)
+
+        try:
+            runtime_job_name = HydraConfig.get().job.name
+        except ValueError:
+            runtime_job_name = None
+        if runtime_job_name:
+            job_name_candidates.append(runtime_job_name)
+
+        job_name = next((name for name in job_name_candidates if name), None)
+
+        log.debug("Resolved hydra job name candidates=%s -> %s", job_name_candidates, job_name)
+
+        if not job_name:
+            raise ValueError(
+                "hydra.job.name is required for training runs. "
+                "Provide it via the config (configs/config.yaml) or on the CLI: "
+                "python -m ct_rate_benchmarks.train hydra.job.name=your_job_name"
+            )
+
         train_model(cfg)
     except Exception as e:
         log.exception(f"An error occurred during training: {e}")

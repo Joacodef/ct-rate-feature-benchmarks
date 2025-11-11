@@ -22,10 +22,10 @@ params:
   # This example defines two hidden layers:
   # 1st: 512 -> 256
   # 2nd: 256 -> 128
-  hidden_dims: [512, 256, 128]
+  hidden_dims: [256, 128]
 
   # Dropout probability to apply after each hidden layer
-  dropout: 0.3
+  dropout: 0.35
 
 # Note: The 'out_features' (number of labels) is not defined here.
 # The training script will add it dynamically based on the

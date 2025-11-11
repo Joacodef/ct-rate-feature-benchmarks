@@ -8,22 +8,9 @@ defaults:
   - model: mlp_visual 
   - override hydra/job_logging: default
   - override hydra/hydra_logging: default
+  - _self_
 
-# Defines paths for data inputs and experiment outputs.
-paths:
-  # --- IMPORTANT ---
-  # This path MUST point to the root directory where your
-  # feature sub-folders (e.g., 'image/', 'text/') are located.
-  data_root: "data/features"
-
-  # Path to the directory where new manifests are stored
-  manifest_dir: "data/manifests"
-  
-  # Experiment output paths
-  output_dir: "outputs/${hydra.job.name}"
-  checkpoint_dir: "${paths.output_dir}/checkpoints/"
-
-# NEW: Defines the manifest filenames for each data split
+# Defines the manifest filenames for each data split
 # These files are expected inside 'paths.manifest_dir'
 data:
   train_manifest: "train_tiny.csv"
@@ -33,6 +20,39 @@ data:
     - "test_manual_all.csv"
     - "test_manual_train.csv"
     - "test_manual_valid.csv"
+
+# Paths and filesystem layout for data, manifests, and run outputs.
+paths:
+  # ====DATA PATHS====
+  # Root directory that contains feature files used by the datasets.
+  data_root: "data/features"
+  # Directory that stores train/val/test manifest CSVs.
+  manifest_dir: "data/manifests"
+
+  # ====OUTPUT PATHS====
+  # Base folder where all experiments are recorded.
+  outputs_root: "outputs"
+  # Job-level folder (one per experiment name) for history and resume metadata.
+  job_base_dir: "${paths.outputs_root}/${hydra:job.name}"
+  # Run-specific folder (one per execution) mirrors Hydra's working directory.
+  run_dir: "${hydra:run.dir}"
+  # Alias maintained for backwards compatibility with existing code/tests.
+  output_dir: "${paths.run_dir}"
+  # Where checkpoints are stored inside the run directory.
+  checkpoint_dir: "${paths.output_dir}/checkpoints/"
+  # Pointer file updated after each run to simplify resume/evaluation.
+  latest_run_pointer: "${paths.job_base_dir}/latest_run.json"
+  # Optional direct checkpoint override (None by default for Hydra struct typing).
+  checkpoint_path: null
+
+# Hydra runtime settings control where each run writes logs/config snapshots.
+hydra:
+  run:
+    # Place each run inside the job-named folder with a timestamped leaf.
+    dir: "${paths.job_base_dir}/${now:%Y-%m-%d_%H-%M-%S}"
+  # Keep Hydra metadata together under a lightweight subfolder.
+  output_subdir: ".hydra"
+
 
 # Defines training and evaluation parameters.
 training:
@@ -52,17 +72,17 @@ training:
   # Based on CT-RATE 
   target_labels: [
     # "Medical material",
-    "Arterial wall calcification",
+    # "Arterial wall calcification",
     # "Cardiomegaly",
     # "Pericardial effusion",
     # "Coronary artery wall calcification",
     # "Hiatal hernia",
     # "Lymphadenopathy",
     # "Emphysema",
-    "Atelectasis",
+    # "Atelectasis",
     "Lung nodule",
-    "Lung opacity",
-    "Pulmonary fibrotic sequela",
+    # "Lung opacity",
+    # "Pulmonary fibrotic sequela",
     # "Pleural effusion",
     # "Mosaic attenuation pattern",
     # "Peribronchial thickening",
@@ -71,7 +91,7 @@ training:
     # "Interlobular septal thickening",
   ]
 
-# NEW: Utility and reproducibility configuration
+# Utility and reproducibility configuration
 utils:
   seed: 42
 
