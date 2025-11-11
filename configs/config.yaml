@@ -61,6 +61,9 @@ training:
   learning_rate: 1e-4
   max_epochs: 5000
   early_stopping_patience: 50
+  resume:
+    enabled: false
+    state_path: null
   
   # Parameters for classification tasks
   task_type: "classification"

@@ -37,3 +37,7 @@ python src/classification/train.py data=multimodal_features model=mlp_multimodal
 ```
 
 This composable approach allows us to define and benchmark new models or data-handling strategies simply by adding new `.yaml` files.
+
+## Resuming a Run
+
+The base config exposes a `training.resume` group. Set `training.resume.enabled=true` to continue from the most recent `last_state.pt` in the run's checkpoint folder, or provide an explicit `training.resume.state_path=/path/to/last_state.pt` override when starting the job.

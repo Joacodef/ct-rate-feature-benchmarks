@@ -25,3 +25,37 @@ def test_training_pipeline_produces_checkpoint(mock_cfg) -> None:
     state_dict = torch.load(checkpoint_path, map_location="cpu")
     assert isinstance(state_dict, dict)
     assert state_dict  # Ensure the state dict contains parameters
+
+
+def test_training_can_resume_from_saved_state(mock_cfg) -> None:
+    """Ensure last_state checkpoints enable a resumed training run."""
+
+    # Run a short initial training session.
+    mock_cfg.training.max_epochs = 2
+    mock_cfg.training.early_stopping_patience = 10
+    train_model(mock_cfg)
+
+    checkpoint_dir = Path(mock_cfg.paths.checkpoint_dir)
+    state_path = checkpoint_dir / "last_state.pt"
+    assert state_path.exists()
+
+    try:
+        saved_state = torch.load(state_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        saved_state = torch.load(state_path, map_location="cpu")
+    assert saved_state.get("epoch") == 2
+
+    # Resume training for additional epochs using the saved state.
+    mock_cfg.training.max_epochs = 4
+    mock_cfg.training.resume.enabled = True
+    mock_cfg.training.resume.state_path = str(state_path)
+
+    resumed_metric = train_model(mock_cfg)
+    assert isinstance(resumed_metric, float)
+
+    try:
+        resumed_state = torch.load(state_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        resumed_state = torch.load(state_path, map_location="cpu")
+    assert resumed_state.get("epoch") >= 4
+    assert "optimizer" in resumed_state

@@ -33,9 +33,6 @@ def _build_test_loaders(
     return test_loaders
 
 
-log = logging.getLogger(__name__)
-
-
 def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
     """Evaluate a trained model on all configured test manifests."""
     log.info("Starting evaluation...")

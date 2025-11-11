@@ -3,7 +3,7 @@ import logging
 import os
 import copy
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import hydra
 import torch
@@ -13,12 +13,87 @@ from omegaconf import DictConfig, OmegaConf
 from common.data.dataset import FeatureDataset
 from common.eval import resolve_checkpoint_dir
 from common.utils import set_seed
+from common.train import (
+    load_resume_state,
+    resolve_path,
+    restore_rng_state,
+    save_training_state,
+    torch_load_full,
+)
 from torch.utils.data import DataLoader
 
 from .loops import evaluate_epoch, train_epoch
 
 
 log = logging.getLogger(__name__)
+
+
+def _find_latest_state(cfg: DictConfig, exclude_run_dir: Optional[Path]) -> Optional[Path]:
+    job_base_dir_str = OmegaConf.select(cfg, "paths.job_base_dir", default=None)
+    if not job_base_dir_str:
+        return None
+
+    try:
+        job_base_dir = resolve_path(cfg, job_base_dir_str)
+    except Exception:
+        return None
+
+    if not job_base_dir.exists():
+        return None
+
+    exclude_resolved = exclude_run_dir.resolve() if exclude_run_dir else None
+
+    try:
+        candidates = sorted(
+            [p for p in job_base_dir.iterdir() if p.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except Exception:
+        return None
+
+    for run_dir in candidates:
+        try:
+            run_dir_resolved = run_dir.resolve()
+        except Exception:
+            run_dir_resolved = run_dir
+
+        if exclude_resolved and run_dir_resolved == exclude_resolved:
+            continue
+
+        candidate_state = run_dir_resolved / "checkpoints" / "last_state.pt"
+        if candidate_state.exists():
+            return candidate_state
+
+    return None
+
+
+def _update_latest_run_pointer(
+    cfg: DictConfig,
+    run_dir: Path,
+    checkpoint_path: Optional[Path],
+    state_path: Optional[Path],
+    best_val_auroc: float,
+) -> None:
+    pointer_path_str = OmegaConf.select(cfg, "paths.latest_run_pointer", default=None)
+    if not pointer_path_str:
+        return
+
+    try:
+        pointer_path = resolve_path(cfg, pointer_path_str)
+        pointer_path.parent.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "run_dir": str(run_dir.resolve()),
+            "checkpoint": str(checkpoint_path.resolve()) if checkpoint_path and checkpoint_path.exists() else None,
+            "state_checkpoint": str(state_path.resolve()) if state_path and state_path.exists() else None,
+            "best_val_auroc": float(best_val_auroc),
+        }
+
+        pointer_path.write_text(json.dumps(payload, indent=2))
+        log.debug("Latest run pointer updated: %s", pointer_path)
+    except Exception as exc:
+        log.warning("Unable to update latest run pointer at %s: %s", pointer_path_str, exc)
 
 def train_model(cfg: DictConfig) -> float:
     """
@@ -59,6 +134,12 @@ def train_model(cfg: DictConfig) -> float:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f"Using device: {device}")
+
+    checkpoint_dir = resolve_checkpoint_dir(cfg)
+    checkpoint_dir_path = Path(checkpoint_dir)
+    checkpoint_dir_path.mkdir(parents=True, exist_ok=True)
+    state_path = checkpoint_dir_path / "last_state.pt"
+    run_dir = checkpoint_dir_path.parent
 
     # --- 2. Calculate Dynamic Parameters ---
     # Dynamically determine the number of labels from the config list
@@ -137,65 +218,157 @@ def train_model(cfg: DictConfig) -> float:
     # TODO: Initialize W&B or TensorBoard logger based on 'cfg.logging'
     log.info(f"Using logger: {cfg.logging.logger_name} (placeholder)")
 
+    resume_enabled = bool(OmegaConf.select(cfg, "training.resume.enabled", default=False))
+    resume_override = OmegaConf.select(cfg, "training.resume.state_path", default=None)
+
+    resume_state, resume_state_path = load_resume_state(
+        cfg=cfg,
+        resume_enabled=resume_enabled,
+        default_state_path=state_path,
+        override_path=resume_override,
+    )
+
+    if resume_enabled and resume_state is None:
+        latest_state = _find_latest_state(cfg, exclude_run_dir=run_dir)
+        if latest_state and latest_state != resume_state_path:
+            try:
+                resume_state = torch_load_full(latest_state)
+                resume_state_path = latest_state
+            except Exception as exc:
+                log.warning("Failed to load fallback resume checkpoint at %s: %s", latest_state, exc)
+
+    start_epoch = 1
+    best_val_auroc = 0.0
+    epochs_no_improve = 0
+    best_model_state: Optional[Any] = None
+
+    if resume_state:
+        model_state = resume_state.get("model")
+        optimizer_state = resume_state.get("optimizer")
+        if model_state:
+            model.load_state_dict(model_state)
+        if optimizer_state:
+            optimizer.load_state_dict(optimizer_state)
+
+        start_epoch = int(resume_state.get("epoch", 0)) + 1
+        best_val_auroc = float(resume_state.get("best_val_auroc", 0.0))
+        epochs_no_improve = int(resume_state.get("epochs_no_improve", 0))
+        best_model_state = resume_state.get("best_model_state")
+
+        restore_rng_state(resume_state.get("rng_state"))
+
+        log.info(
+            "Resuming training from %s (next epoch=%d, best_val_auroc=%.4f)",
+            resume_state_path,
+            start_epoch,
+            best_val_auroc,
+        )
+    elif resume_enabled:
+        log.info("Resume requested but no checkpoint restored; starting fresh training.")
+
+    # Ensure there is always a state snapshot for the current run, even if we
+    # exit before completing an epoch.
+    save_training_state(
+        path=state_path,
+        epoch=start_epoch - 1,
+        model=model,
+        optimizer=optimizer,
+        best_val_auroc=best_val_auroc,
+        epochs_no_improve=epochs_no_improve,
+        best_model_state=best_model_state,
+    )
+    _update_latest_run_pointer(
+        cfg=cfg,
+        run_dir=run_dir,
+        checkpoint_path=None,
+        state_path=state_path,
+        best_val_auroc=best_val_auroc,
+    )
+
     # --- 7. Run Training Loop ---
-    log.info(f"Starting training for {cfg.training.max_epochs} epochs.")
+    log.info(
+        "Starting training for %s epochs (beginning at epoch %s).",
+        cfg.training.max_epochs,
+        start_epoch,
+    )
 
     # Early stopping parameters
     patience = OmegaConf.select(
         cfg, "training.early_stopping_patience", default=10
     )
     log.info(f"Early stopping patience set to {patience} epochs.")
-    epochs_no_improve = 0
-    best_val_auroc = 0.0
-    best_model_state = None
     
-    for epoch in range(1, cfg.training.max_epochs + 1):
-        
-        # Run one epoch of training
-        train_loss = train_epoch(
-            model, dataloader_train, optimizer, criterion, device
-        )
-        
-        # Run one epoch of validation
-        val_loss, val_metrics = evaluate_epoch(
-            model, dataloader_val, criterion, device
-        )
-        
-        val_auroc = val_metrics["auroc"]
-        
-        log.info(
-            f"Epoch {epoch}/{cfg.training.max_epochs} | "
-            f"Train Loss: {train_loss:.4f} | "
-            f"Val Loss: {val_loss:.4f} | "
-            f"Val AUROC: {val_auroc:.4f}"
-        )
+    interrupted = False
+    try:
+        for epoch in range(start_epoch, cfg.training.max_epochs + 1):
 
-        # --- Early Stopping Check ---
-        if val_auroc > best_val_auroc:
-            best_val_auroc = val_auroc
-            epochs_no_improve = 0
-            # Store the state of the best performing model
-            best_model_state = copy.deepcopy(model.state_dict())
-            log.debug(f"New best val AUROC: {best_val_auroc:.4f}. Resetting patience.")
-        else:
-            epochs_no_improve += 1
-            log.debug(f"Val AUROC did not improve. Patience: {epochs_no_improve}/{patience}")
-
-        # Check if patience has been exceeded
-        if epochs_no_improve >= patience:
-            log.info(
-                f"Early stopping triggered after {patience} epochs "
-                f"without improvement. Best Val AUROC: {best_val_auroc:.4f}"
+            # Run one epoch of training
+            train_loss = train_epoch(
+                model, dataloader_train, optimizer, criterion, device
             )
-            break
 
-    log.info("Training complete.")
+            # Run one epoch of validation
+            val_loss, val_metrics = evaluate_epoch(
+                model, dataloader_val, criterion, device
+            )
+
+            val_auroc = val_metrics["auroc"]
+
+            log.info(
+                f"Epoch {epoch}/{cfg.training.max_epochs} | "
+                f"Train Loss: {train_loss:.4f} | "
+                f"Val Loss: {val_loss:.4f} | "
+                f"Val AUROC: {val_auroc:.4f}"
+            )
+
+            # --- Early Stopping Check ---
+            if val_auroc > best_val_auroc:
+                best_val_auroc = val_auroc
+                epochs_no_improve = 0
+                # Store the state of the best performing model
+                best_model_state = copy.deepcopy(model.state_dict())
+                log.debug(f"New best val AUROC: {best_val_auroc:.4f}. Resetting patience.")
+            else:
+                epochs_no_improve += 1
+                log.debug(
+                    f"Val AUROC did not improve. Patience: {epochs_no_improve}/{patience}"
+                )
+
+            save_training_state(
+                path=state_path,
+                epoch=epoch,
+                model=model,
+                optimizer=optimizer,
+                best_val_auroc=best_val_auroc,
+                epochs_no_improve=epochs_no_improve,
+                best_model_state=best_model_state,
+            )
+            _update_latest_run_pointer(
+                cfg=cfg,
+                run_dir=run_dir,
+                checkpoint_path=None,
+                state_path=state_path,
+                best_val_auroc=best_val_auroc,
+            )
+
+            # Check if patience has been exceeded
+            if epochs_no_improve >= patience:
+                log.info(
+                    f"Early stopping triggered after {patience} epochs "
+                    f"without improvement. Best Val AUROC: {best_val_auroc:.4f}"
+                )
+                break
+    except KeyboardInterrupt:
+        interrupted = True
+        log.info("Training interrupted by user. Latest state saved to: %s", state_path)
+
+    if not interrupted:
+        log.info("Training complete.")
+    else:
+        log.info("Exiting early due to interruption.")
 
     # --- 8. Save Artifacts ---
-    checkpoint_dir = resolve_checkpoint_dir(cfg)
-
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    checkpoint_path = os.path.join(checkpoint_dir, "final_model.pt")
+    checkpoint_path = checkpoint_dir_path / "final_model.pt"
 
     # Save the best model state captured during training
     if best_model_state:
@@ -212,39 +385,16 @@ def train_model(cfg: DictConfig) -> float:
             "(No validation improvement was captured)"
         )
 
-    # --- 9. Update Latest Run Pointer ---
-    pointer_path_str = OmegaConf.select(cfg, "paths.latest_run_pointer")
-    if pointer_path_str:
-        try:
-            original_cwd = OmegaConf.select(cfg, "hydra.runtime.cwd", default=os.getcwd())
-            pointer_path = Path(original_cwd) / Path(os.path.normpath(pointer_path_str))
-            pointer_path.parent.mkdir(parents=True, exist_ok=True)
+    _update_latest_run_pointer(
+        cfg=cfg,
+        run_dir=run_dir,
+        checkpoint_path=checkpoint_path,
+        state_path=state_path,
+        best_val_auroc=best_val_auroc,
+    )
 
-            run_dir_cfg = OmegaConf.select(cfg, "paths.run_dir", default=None)
-            if run_dir_cfg:
-                run_dir = Path(os.path.normpath(run_dir_cfg))
-                if not run_dir.is_absolute():
-                    run_dir = Path(original_cwd) / run_dir
-            else:
-                try:
-                    run_dir = Path(HydraConfig.get().runtime.output_dir)
-                except Exception:
-                    run_dir = Path(checkpoint_dir).parent
-            run_dir = run_dir.resolve()
-            payload = {
-                "run_dir": str(run_dir),
-                "checkpoint": str(Path(checkpoint_path).resolve()),
-                "best_val_auroc": float(best_val_auroc),
-            }
-
-            pointer_path.write_text(json.dumps(payload, indent=2))
-            log.info("Latest run pointer updated: %s", pointer_path)
-        except Exception as exc:
-            log.warning(
-                "Unable to update latest run pointer at %s: %s",
-                pointer_path_str,
-                exc,
-            )
+    if interrupted:
+        raise KeyboardInterrupt
 
     # Return the best validation metric
     return best_val_auroc

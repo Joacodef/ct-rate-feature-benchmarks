@@ -46,6 +46,13 @@ What this does
 - Loads manifests and feature files using `common.data.dataset.FeatureDataset`.
 - Instantiates a model via Hydra configuration and adjusts output size to match the number of target labels.
 - Trains with PyTorch, computes AUROC as the primary metric, and saves a final checkpoint to the configured checkpoint directory.
+- Persists a `last_state.pt` training snapshot each epoch so interrupted runs can resume where they left off.
+
+Resuming training
+
+- Set `training.resume.enabled=true` to resume from the most recent `last_state.pt` in `paths.checkpoint_dir` (or the path recorded in `paths.latest_run_pointer`).
+- Provide `training.resume.state_path=/path/to/last_state.pt` to resume from a specific snapshot.
+- RNG, optimizer, and best-metric tracking are restored automatically before training continues.
 
 Configuration
 

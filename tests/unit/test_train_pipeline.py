@@ -31,3 +31,4 @@ def test_train_model_runs(mock_cfg: DictConfig) -> None:
     assert output_dir.exists()
     assert checkpoint_dir.exists()
     assert (checkpoint_dir / "final_model.pt").exists()
+    assert (checkpoint_dir / "last_state.pt").exists()

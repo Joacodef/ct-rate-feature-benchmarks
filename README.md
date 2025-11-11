@@ -60,6 +60,14 @@ Override configuration values on the command line as needed, for example to chan
 python -m classification.train training.batch_size=64 training.max_epochs=10 paths.data_root="E:/ct-rate-feature-benchmarks/data/features"
 ```
 
+Resume an interrupted run by enabling the resume flag or pointing directly to a saved training snapshot:
+
+```powershell
+python -m classification.train training.resume.enabled=true
+# or
+python -m classification.train training.resume.state_path="outputs/your_job/latest_run/checkpoints/last_state.pt"
+```
+
 Key behaviors (from `src/classification/train.py`):
 
 - Loads manifests from `paths.manifest_dir` (default: `data/manifests`) using `FeatureDataset`.
