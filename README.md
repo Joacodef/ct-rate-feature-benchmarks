@@ -32,7 +32,14 @@ ct-rate-feature-benchmarks/
 │  ├─ common/              # Shared data loaders, seeding, checkpoint helpers
 │  └─ retrieval/           # Retrieval-specific code (WIP)
 ├─ tests/
-│  └─ unit/test_train_pipeline.py
+│  ├─ integration/
+│  │  └─ test_training_pipeline.py
+│  └─ unit/
+│     ├─ test_checkpointing.py
+│     ├─ test_evaluate.py
+│     ├─ test_feature_dataset.py
+│     ├─ test_loops.py
+│     └─ test_resume.py
 ├─ pyproject.toml
 └─ README.md
 ```
