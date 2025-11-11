@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 import torch
 
-from classification.data.dataset import FeatureDataset
+from common.data.dataset import FeatureDataset
 
 
 def test_missing_manifest_raises(tmp_path: Path) -> None:

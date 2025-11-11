@@ -4,7 +4,7 @@ This package contains the core code for loading feature datasets, model definiti
 
 Contents
 
-- `data/` — dataset and data-loading utilities (e.g., `FeatureDataset`).
+- `common/data/` — shared dataset utilities (e.g., `FeatureDataset`).
 - `models/` — model architecture implementations (MLP, probes, etc.).
 - `train.py` — training and evaluation pipeline (Hydra-configured entry point).
 
@@ -36,7 +36,7 @@ python -m classification.train training.batch_size=64 training.max_epochs=10
 
 What this does
 
-- Loads manifests and feature files using `classification.data.dataset.FeatureDataset`.
+- Loads manifests and feature files using `common.data.dataset.FeatureDataset`.
 - Instantiates a model via Hydra configuration and adjusts output size to match the number of target labels.
 - Trains with PyTorch, computes AUROC as the primary metric, and saves a final checkpoint to the configured checkpoint directory.
 
@@ -61,7 +61,7 @@ Notes and recommendations
 Import examples
 
 ```python
-from classification.data.dataset import FeatureDataset
+from common.data.dataset import FeatureDataset
 from classification.models import MLP
 ```
 

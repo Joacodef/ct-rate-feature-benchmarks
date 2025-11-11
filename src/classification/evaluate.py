@@ -11,8 +11,10 @@ from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import InterpolationKeyError
 from torch.utils.data import DataLoader
 
-from .data.dataset import FeatureDataset
-from .train import evaluate_epoch, set_seed
+from common.data.dataset import FeatureDataset
+from common.utils import set_seed
+
+from .loops import evaluate_epoch
 
 log = logging.getLogger(__name__)
 

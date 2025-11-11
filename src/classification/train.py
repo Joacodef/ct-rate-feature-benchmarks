@@ -1,213 +1,24 @@
 import json
 import logging
 import os
-import random
 import copy
-from hydra.core.hydra_config import HydraConfig
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import List
 
 import hydra
-import numpy as np
 import torch
-import torch.nn as nn
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import InterpolationKeyError
-from sklearn.metrics import roc_auc_score
+
+from common.data.dataset import FeatureDataset
+from common.utils import set_seed
 from torch.utils.data import DataLoader
-from tqdm.auto import tqdm
 
-from . import data  
-from . import models 
-from .data.dataset import FeatureDataset
+from .loops import evaluate_epoch, train_epoch
 
-# Initialize a logger for this module
+
 log = logging.getLogger(__name__)
-
-
-def set_seed(seed: int):
-    """
-    Sets the random seed for reproducibility across random,
-    numpy, and torch libraries.
-
-    Args:
-        seed: The integer value to use as the seed.
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    # Ensure deterministic behavior for cuDNN
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def compute_metrics(
-    preds: torch.Tensor, targets: torch.Tensor
-) -> Dict[str, float]:
-    """
-    Calculates the AUROC score for multi-label classification.
-    Converts logits to probabilities using sigmoid.
-
-    Args:
-        preds: Raw logits from the model of shape (B, C) or (N, C).
-        targets: Ground truth labels of shape (B, C) or (N, C).
-
-    Returns:
-        A dictionary containing the computed AUROC score.
-    """
-    # Detach tensors, move to CPU, and convert to numpy
-    # Apply sigmoid to logits to get probabilities
-    preds_prob = torch.sigmoid(preds).detach().cpu().numpy()
-    targets_np = targets.detach().cpu().numpy()
-
-    try:
-        # Calculate AUROC
-        # 'macro' average calculates the metric for each label,
-        # then finds their unweighted mean.
-        auroc = roc_auc_score(targets_np, preds_prob, average="macro")
-    except ValueError as e:
-        # Handle cases where a mini-batch or dataset split might
-        # not have positive samples for all classes.
-        log.warning(f"Could not compute AUROC (likely due to missing labels): {e}")
-        auroc = 0.0
-
-    return {"auroc": auroc}
-
-
-def train_epoch(
-    model: nn.Module,
-    dataloader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    criterion: nn.Module,
-    device: torch.device,
-) -> float:
-    """
-    Runs a single training epoch.
-
-    Args:
-        model: The PyTorch model to train.
-        dataloader: The DataLoader for the training set.
-        optimizer: The optimizer to use for updating weights.
-        criterion: The loss function.
-        device: The device (cuda or cpu) to run training on.
-
-    Returns:
-        The average training loss for the epoch.
-    """
-    # Set the model to training mode
-    model.train()
-    
-    total_loss = 0.0
-    
-    # Iterate over the training data
-    # Wrap dataloader with tqdm to show a progress bar per batch
-    train_iter = tqdm(dataloader, desc="Train", unit="batch")
-    for batch in train_iter:
-        # 1. Get data and move to device
-        # We only use visual features for this model
-        features = batch["visual_features"].to(device)
-        labels = batch["labels"].to(device)
-        
-        # 2. Zero the gradients
-        optimizer.zero_grad()
-        
-        # 3. Forward pass: compute predicted outputs
-        preds = model(features)
-        
-        # 4. Calculate the batch loss
-        loss = criterion(preds, labels)
-        
-        # 5. Backward pass: compute gradient of the loss
-        loss.backward()
-        
-        # 6. Perform a single optimization step
-        optimizer.step()
-        
-        # 7. Update total loss
-        total_loss += loss.item()
-        # Update progress bar with current loss
-        try:
-            train_iter.set_postfix(train_loss=f"{loss.item():.4f}")
-        except Exception:
-            # If tqdm can't be updated for any reason, ignore
-            pass
-
-    # Calculate and return the average loss for the epoch
-    avg_loss = total_loss / len(dataloader)
-    return avg_loss
-
-
-@torch.no_grad()  # Disables gradient calculation
-def evaluate_epoch(
-    model: nn.Module,
-    dataloader: DataLoader,
-    criterion: nn.Module,
-    device: torch.device,
-) -> Tuple[float, Dict[str, float]]:
-    """
-    Runs a single evaluation epoch.
-
-    Args:
-        model: The PyTorch model to evaluate.
-        dataloader: The DataLoader for the validation or test set.
-        criterion: The loss function.
-        device: The device (cuda or cpu) to run evaluation on.
-
-    Returns:
-        A tuple containing:
-        - The average loss for the epoch.
-        - A dictionary of computed metrics (e.g., {"auroc": 0.85}).
-    """
-    # Set the model to evaluation mode
-    model.eval()
-    
-    total_loss = 0.0
-    
-    # Lists to store all predictions and labels for metric calculation
-    all_preds = []
-    all_labels = []
-
-    # Iterate over the data
-    # Use tqdm for evaluation progress as well
-    eval_iter = tqdm(dataloader, desc="Eval", unit="batch")
-    for batch in eval_iter:
-        # 1. Get data and move to device
-        features = batch["visual_features"].to(device)
-        labels = batch["labels"].to(device)
-        
-        # 2. Forward pass: compute predicted outputs
-        preds = model(features)
-        
-        # 3. Calculate the batch loss
-        loss = criterion(preds, labels)
-        
-        # 4. Update total loss
-        total_loss += loss.item()
-        
-        # 5. Store predictions and labels for metrics
-        all_preds.append(preds)
-        all_labels.append(labels)
-        # Update progress bar with current eval loss
-        try:
-            eval_iter.set_postfix(eval_loss=f"{loss.item():.4f}")
-        except Exception:
-            pass
-
-    # Calculate the average loss for the epoch
-    avg_loss = total_loss / len(dataloader)
-    
-    # --- Calculate Metrics ---
-    # Concatenate all batches into single tensors
-    all_preds_tensor = torch.cat(all_preds, dim=0)
-    all_labels_tensor = torch.cat(all_labels, dim=0)
-    
-    # Compute the metrics
-    metrics = compute_metrics(all_preds_tensor, all_labels_tensor)
-
-    return avg_loss, metrics
-
 
 def train_model(cfg: DictConfig) -> float:
     """
