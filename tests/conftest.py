@@ -74,8 +74,16 @@ def mock_cfg(mock_data_path: Path) -> DictConfig:
             overrides=[
                 "hydra/job_logging=default",
                 "hydra/hydra_logging=default",
+                # Provide concrete paths for keys that would otherwise use
+                # Hydra resolvers (e.g. ${hydra:run.dir}). Setting these
+                # `paths.*` values directly avoids the need for a running
+                # HydraConfig during composition.
+                f"paths.run_dir={(mock_data_path / 'outputs').as_posix()}",
+                f"paths.job_base_dir={(mock_data_path / 'outputs' / 'job').as_posix()}",
                 f"paths.data_root={(mock_data_path / 'data_root').as_posix()}",
                 f"paths.manifest_dir={(mock_data_path / 'manifests').as_posix()}",
+                f"data.train_manifest={ (mock_data_path / 'manifests' / 'train.csv').name}",
+                f"data.val_manifest={ (mock_data_path / 'manifests' / 'valid.csv').name}",
                 f"paths.output_dir={(mock_data_path / 'outputs').as_posix()}",
                 f"paths.checkpoint_dir={(mock_data_path / 'outputs' / 'checkpoints').as_posix()}",
                 "data.test_manifests=[test1.csv]",
