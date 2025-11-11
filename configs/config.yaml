@@ -84,7 +84,7 @@ training:
     # "Emphysema",
     # "Atelectasis",
     "Lung nodule",
-    # "Lung opacity",
+    "Lung opacity",
     # "Pulmonary fibrotic sequela",
     # "Pleural effusion",
     # "Mosaic attenuation pattern",

@@ -3,6 +3,7 @@ import os
 from typing import Dict, List, Tuple
 
 import hydra
+import json
 import torch
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
@@ -33,6 +34,34 @@ def _build_test_loaders(
     return test_loaders
 
 
+def _resolve_detailed_metrics_dir(cfg: DictConfig) -> str:
+    """Return an absolute directory path for detailed metrics outputs."""
+
+    candidate_keys = [
+        "hydra.runtime.output_dir",
+        "hydra.run.dir",
+        "paths.run_dir",
+        "paths.output_dir",
+    ]
+
+    base_dir = OmegaConf.select(cfg, "hydra.runtime.cwd", default=os.getcwd())
+    base_dir = os.path.normpath(base_dir)
+
+    for key in candidate_keys:
+        try:
+            candidate = OmegaConf.select(cfg, key)
+        except Exception:
+            candidate = None
+
+        if candidate:
+            candidate_path = os.path.normpath(str(candidate))
+            if not os.path.isabs(candidate_path):
+                candidate_path = os.path.normpath(os.path.join(base_dir, candidate_path))
+            return os.path.join(candidate_path, "detailed_metrics")
+
+    return os.path.join(base_dir, "detailed_metrics")
+
+
 def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
     """Evaluate a trained model on all configured test manifests."""
     log.info("Starting evaluation...")
@@ -42,9 +71,15 @@ def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info("Using device: %s", device)
 
+    target_labels = list(cfg.training.target_labels)
+    negative_class_name = OmegaConf.select(
+        cfg, "evaluation.negative_class_name", default="No pathology"
+    )
+    detailed_metrics_dir = _resolve_detailed_metrics_dir(cfg)
+
     dataset_args = {
         "data_root": cfg.paths.data_root,
-        "target_labels": list(cfg.training.target_labels),
+        "target_labels": target_labels,
         "visual_feature_col": cfg.data.columns.visual_feature,
         "text_feature_col": cfg.data.columns.text_feature,
         "preload": bool(OmegaConf.select(cfg, "data.preload_features", default=False)),
@@ -66,7 +101,7 @@ def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
     model = hydra.utils.instantiate(
         cfg.model.params,
         _target_=cfg.model._target_,
-        out_features=len(cfg.training.target_labels),
+        out_features=len(target_labels),
         _recursive_=False,
     ).to(device)
 
@@ -85,7 +120,21 @@ def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
 
     results: Dict[str, float] = {}
     for manifest_name, dataloader in test_loaders:
-        test_loss, test_metrics = evaluate_epoch(model, dataloader, criterion, device)
+        # Try to request per-class metrics by passing label names. Some call-sites
+        # (and tests) may monkeypatch or expect the older signature, so fall
+        # back to the 4-arg call if the function does not accept the extra
+        # parameter.
+        try:
+            test_loss, test_metrics = evaluate_epoch(
+                model,
+                dataloader,
+                criterion,
+                device,
+                target_labels,
+                negative_class_name,
+            )
+        except TypeError:
+            test_loss, test_metrics = evaluate_epoch(model, dataloader, criterion, device)
         metric_key = f"test_{manifest_name}_auroc"
         results[metric_key] = test_metrics["auroc"]
         log.info(
@@ -94,6 +143,26 @@ def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
             test_loss,
             test_metrics["auroc"],
         )
+
+        # If per-class metrics are available, write a detailed per-manifest
+        # report alongside the rest of the Hydra evaluation artifacts.
+        if "per_class" in test_metrics:
+            try:
+                os.makedirs(detailed_metrics_dir, exist_ok=True)
+                report_path = os.path.join(
+                    detailed_metrics_dir, f"{manifest_name}_detailed_metrics.json"
+                )
+                payload = {
+                    "manifest": manifest_name,
+                    "loss": float(test_loss),
+                    "auroc": float(test_metrics.get("auroc", 0.0)),
+                    "per_class": test_metrics.get("per_class"),
+                }
+                with open(report_path, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh, indent=2)
+                log.info("Wrote detailed per-class metrics to: %s", report_path)
+            except Exception as exc:
+                log.warning("Failed to write per-class metrics report: %s", exc)
 
     return results
 
