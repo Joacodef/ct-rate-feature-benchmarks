@@ -25,10 +25,11 @@ ct-rate-feature-benchmarks/
 │  └─ prepare_manifests.py
 ├─ src/
 │  ├─ classification/
-│  │  ├─ data/
+│  │  ├─ loops.py          # Training/eval loops & metrics
 │  │  ├─ models/
-│  │  └─ train.py          # Hydra-configured classification entry point
-│  ├─ common/              # Shared utilities (WIP)
+│  │  ├─ train.py          # Hydra-configured classification entry point
+│  │  └─ evaluate.py       # Checkpoint evaluation entry point
+│  ├─ common/              # Shared data loaders, seeding, checkpoint helpers
 │  └─ retrieval/           # Retrieval-specific code (WIP)
 ├─ tests/
 │  └─ unit/test_train_pipeline.py

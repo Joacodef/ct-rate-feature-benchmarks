@@ -9,9 +9,9 @@ import hydra
 import torch
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
-from omegaconf.errors import InterpolationKeyError
 
 from common.data.dataset import FeatureDataset
+from common.eval import resolve_checkpoint_dir
 from common.utils import set_seed
 from torch.utils.data import DataLoader
 
@@ -192,15 +192,7 @@ def train_model(cfg: DictConfig) -> float:
     log.info("Training complete.")
 
     # --- 8. Save Artifacts ---
-    try:
-        checkpoint_dir = os.path.normpath(cfg.paths.checkpoint_dir)
-    except (InterpolationKeyError, AttributeError):
-        job_name = OmegaConf.select(cfg, "hydra.job.name", default="manual_run")
-        checkpoint_dir = os.path.normpath(os.path.join("outputs", job_name, "checkpoints"))
-        log.warning(
-            "hydra.job.name not available; falling back to checkpoint directory: %s",
-            checkpoint_dir,
-        )
+    checkpoint_dir = resolve_checkpoint_dir(cfg)
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_path = os.path.join(checkpoint_dir, "final_model.pt")

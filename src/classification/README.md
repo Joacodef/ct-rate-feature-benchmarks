@@ -4,9 +4,16 @@ This package contains the core code for loading feature datasets, model definiti
 
 Contents
 
-- `common/data/` — shared dataset utilities (e.g., `FeatureDataset`).
+- `loops.py` — reusable training and evaluation loops plus AUROC metric helpers.
 - `models/` — model architecture implementations (MLP, probes, etc.).
-- `train.py` — training and evaluation pipeline (Hydra-configured entry point).
+- `train.py` — training orchestration (Hydra-configured entry point).
+- `evaluate.py` — checkpoint-driven evaluation entry point.
+
+This package depends on shared modules under `common/`:
+
+- `common/data/dataset.py` — the `FeatureDataset` loader.
+- `common/utils/seed.py` — deterministic seeding utilities.
+- `common/eval/checkpointing.py` — checkpoint location helpers.
 
 Overview
 
