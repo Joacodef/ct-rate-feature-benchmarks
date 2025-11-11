@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 import torch
@@ -99,9 +100,7 @@ def test_loads_npz_feature(tmp_path: Path) -> None:
     visual_arr = (torch.randn(6).numpy())
     # Save as .npz
     npz_path = feature_dir / "visual_npz.npz"
-    import numpy as _np
-
-    _np.savez(npz_path, visual_arr)
+    np.savez(npz_path, visual_arr)
 
     manifest_path = tmp_path / "manifest_npz.csv"
     pd.DataFrame({
@@ -119,3 +118,43 @@ def test_loads_npz_feature(tmp_path: Path) -> None:
     item = dataset[0]
     assert torch.allclose(item["visual_features"], torch.tensor(visual_arr, dtype=torch.float32))
     assert item["labels"].tolist() == [1.0]
+
+
+def test_preload_populates_caches_and_normalizes_paths(tmp_path: Path, monkeypatch) -> None:
+    data_root = tmp_path / "root"
+    feature_dir = data_root / "features"
+    feature_dir.mkdir(parents=True)
+
+    feature_tensor = torch.randn(2, 2)
+    torch.save(feature_tensor, feature_dir / "visual.pt")
+
+    manifest_path = tmp_path / "manifest_preload.csv"
+    pd.DataFrame({
+        "visual": ["/features/visual.pt"],
+        "label": [1],
+    }).to_csv(manifest_path, index=False)
+
+    calls = []
+    original_load = FeatureDataset._load_feature
+
+    def tracking_loader(self, relative_path):
+        calls.append(relative_path)
+        return original_load(self, relative_path)
+
+    monkeypatch.setattr(FeatureDataset, "_load_feature", tracking_loader)
+
+    dataset = FeatureDataset(
+        manifest_path=str(manifest_path),
+        data_root=str(data_root),
+        target_labels=["label"],
+        visual_feature_col="visual",
+        preload=True,
+    )
+
+    assert calls == ["/features/visual.pt"]
+
+    calls.clear()
+    sample = dataset[0]
+    assert torch.allclose(sample["visual_features"], feature_tensor.view(-1))
+    assert sample["labels"].tolist() == [1.0]
+    assert calls == []

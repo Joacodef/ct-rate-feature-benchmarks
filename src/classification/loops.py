@@ -1,6 +1,7 @@
 """Training and evaluation loops for classification models."""
 
 import logging
+import math
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -33,6 +34,8 @@ def compute_metrics(
 
 	try:
 		auroc = roc_auc_score(targets_np, preds_prob, average="macro")
+		if not math.isfinite(auroc):
+			raise ValueError("Non-finite AUROC")
 	except ValueError as exc:
 		log.warning("Could not compute AUROC (likely due to missing labels): %s", exc)
 		auroc = 0.0
