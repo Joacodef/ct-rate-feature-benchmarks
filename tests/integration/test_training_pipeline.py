@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 
-from ct_rate_benchmarks.train import train_model
+from classification.train import train_model
 
 
 def test_training_pipeline_produces_checkpoint(mock_cfg) -> None:

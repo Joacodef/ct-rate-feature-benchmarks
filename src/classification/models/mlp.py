@@ -1,4 +1,4 @@
-# src/ct_rate_benchmarks/models/mlp.py
+# src/classification/models/mlp.py
 
 from typing import List
 

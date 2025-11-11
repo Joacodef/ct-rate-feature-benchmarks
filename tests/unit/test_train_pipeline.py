@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig
 
-from ct_rate_benchmarks.train import train_model
+from classification.train import train_model
 
 
 def test_train_model_runs(mock_cfg: DictConfig) -> None:

@@ -4,7 +4,7 @@
 # This model uses only visual features as input.
 
 # The _target_ specifies the full Python path to the class to instantiate.
-_target_: "ct_rate_benchmarks.models.mlp.MLP"
+_target_: "classification.models.mlp.MLP"
 
 # Name of this model configuration (metadata, not passed to class)
 model_name: "mlp_visual"

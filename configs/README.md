@@ -22,7 +22,7 @@ When you run the main training script, Hydra builds the complete configuration b
 # 1. config.yaml
 # 2. data/default_features.yaml
 # 3. model/mlp_visual.yaml
-python src/ct_rate_benchmarks/train.py
+python src/classification/train.py
 ````
 
 **Swapping Configurations:**
@@ -33,7 +33,7 @@ The power of this system is in swapping components from the command line. If you
 # 1. config.yaml
 # 2. data/multimodal_features.yaml  <-- SWAPPED
 # 3. model/mlp_multimodal.yaml      <-- SWAPPED
-python src/ct_rate_benchmarks/train.py data=multimodal_features model=mlp_multimodal
+python src/classification/train.py data=multimodal_features model=mlp_multimodal
 ```
 
 This composable approach allows us to define and benchmark new models or data-handling strategies simply by adding new `.yaml` files.

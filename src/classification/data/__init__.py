@@ -1,4 +1,4 @@
-# src/ct_rate_benchmarks/data/__init__.py
+# src/classification/data/__init__.py
 
 """
 Data Package Initialization.

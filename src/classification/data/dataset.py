@@ -1,4 +1,4 @@
-# src/ct_rate_benchmarks/data/dataset.py
+# src/classification/data/dataset.py
 
 import logging
 import os

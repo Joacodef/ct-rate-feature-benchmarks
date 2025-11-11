@@ -24,10 +24,12 @@ ct-rate-feature-benchmarks/
 ├─ scripts/
 │  └─ prepare_manifests.py
 ├─ src/
-│  └─ ct_rate_benchmarks/
-│     ├─ data/
-│     ├─ models/
-│     └─ train.py          # Hydra-configured training entry point
+│  ├─ classification/
+│  │  ├─ data/
+│  │  ├─ models/
+│  │  └─ train.py          # Hydra-configured classification entry point
+│  ├─ common/              # Shared utilities (WIP)
+│  └─ retrieval/           # Retrieval-specific code (WIP)
 ├─ tests/
 │  └─ unit/test_train_pipeline.py
 ├─ pyproject.toml
@@ -45,19 +47,19 @@ pip install -e .
 
 ## Running training
 
-Training is configured with Hydra. The entry point is `ct_rate_benchmarks.train`, which loads `configs/config.yaml` by default. Run from the repository root so relative config paths resolve correctly.
+Training is configured with Hydra. The entry point is `classification.train`, which loads `configs/config.yaml` by default. Run from the repository root so relative config paths resolve correctly.
 
 ```powershell
-python -m ct_rate_benchmarks.train
+python -m classification.train
 ```
 
 Override configuration values on the command line as needed, for example to change the batch size, epochs, or point to your features root:
 
 ```powershell
-python -m ct_rate_benchmarks.train training.batch_size=64 training.max_epochs=10 paths.data_root="E:/ct-rate-feature-benchmarks/data/features"
+python -m classification.train training.batch_size=64 training.max_epochs=10 paths.data_root="E:/ct-rate-feature-benchmarks/data/features"
 ```
 
-Key behaviors (from `src/ct_rate_benchmarks/train.py`):
+Key behaviors (from `src/classification/train.py`):
 
 - Loads manifests from `paths.manifest_dir` (default: `data/manifests`) using `FeatureDataset`.
 - Resolves label count from `training.target_labels`.
@@ -80,7 +82,7 @@ Top-level config: `configs/config.yaml`.
   - `loss`: default `torch.nn.BCEWithLogitsLoss`.
   - `target_labels`: list of label column names expected in the manifests.
 - model
-  - See `configs/model/mlp_visual.yaml` with `_target_` = `ct_rate_benchmarks.models.mlp.MLP` and constructor `params` (e.g., `in_features`, `hidden_dims`, `dropout`).
+  - See `configs/model/mlp_visual.yaml` with `_target_` = `classification.models.mlp.MLP` and constructor `params` (e.g., `in_features`, `hidden_dims`, `dropout`).
 
 Data manifest expectations (see `configs/data/default_features.yaml`):
 
@@ -117,4 +119,4 @@ pytest -q
 
 - Python 3.8+ is recommended.
 - CUDA is used automatically when available.
-- For guidance on the package internals, see `src/ct_rate_benchmarks/README.md`.
+- For guidance on the package internals, see `src/classification/README.md`.

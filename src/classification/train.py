@@ -486,7 +486,7 @@ def main(cfg: DictConfig) -> None:
             raise ValueError(
                 "hydra.job.name is required for training runs. "
                 "Provide it via the config (configs/config.yaml) or on the CLI: "
-                "python -m ct_rate_benchmarks.train hydra.job.name=your_job_name"
+                "python -m classification.train hydra.job.name=your_job_name"
             )
 
         train_model(cfg)

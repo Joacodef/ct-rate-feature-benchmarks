@@ -5,7 +5,7 @@ from omegaconf import OmegaConf, DictConfig
 
 import pytest
 
-from ct_rate_benchmarks import evaluate
+from classification import evaluate
 
 
 class SimpleModel(torch.nn.Module):
@@ -78,7 +78,7 @@ def test_evaluate_model_returns_metrics(tmp_path, monkeypatch):
             # explicit checkpoint path -> should be resolved and used
             "checkpoint_path": str(ckpt_path),
         },
-        "model": {"params": {}, "_target_": "ct_rate_benchmarks.tests.dummy"},
+    "model": {"params": {}, "_target_": "classification.tests.dummy"},
     })
 
     # Call evaluate_model and assert expected metric is returned
