@@ -75,7 +75,7 @@ training:
   # Based on CT-RATE 
   target_labels: [
     # "Medical material",
-    # "Arterial wall calcification",
+    "Arterial wall calcification",
     # "Cardiomegaly",
     # "Pericardial effusion",
     # "Coronary artery wall calcification",
@@ -102,4 +102,12 @@ utils:
 logging:
   logger_name: "wandb" 
   project_name: "ct-rate-feature-benchmarks"
+  entity: null
+  group: null
+  run_name: null
+  job_type: null
+  tags: []
   log_model: false # (e.g., "all", "false")
+  watch:
+    log: null # Override to "gradients" or "all" to control wandb.watch
+    log_freq: 100

@@ -14,7 +14,11 @@ from common.data.dataset import FeatureDataset
 from common.eval import resolve_checkpoint_dir
 from common.utils import set_seed
 from common.train import (
+    build_epoch_payload,
+    finalize_wandb_run,
+    init_wandb_run,
     load_resume_state,
+    log_wandb_metrics,
     resolve_path,
     restore_rng_state,
     save_training_state,
@@ -141,6 +145,14 @@ def train_model(cfg: DictConfig) -> float:
     state_path = checkpoint_dir_path / "last_state.pt"
     run_dir = checkpoint_dir_path.parent
 
+    wandb_module: Optional[Any] = None
+    wandb_run: Optional[Any] = None
+    interrupted = False
+    start_epoch = 1
+    best_val_auroc = 0.0
+    epochs_no_improve = 0
+    best_model_state: Optional[Any] = None
+
     # --- 2. Calculate Dynamic Parameters ---
     # Dynamically determine the number of labels from the config list
     num_labels = len(cfg.training.target_labels)
@@ -205,199 +217,235 @@ def train_model(cfg: DictConfig) -> float:
         _recursive_=False
     ).to(device)
 
-    # --- 5. Initialize Optimizer and Loss ---
-    log.info(f"Instantiating optimizer (LR: {cfg.training.learning_rate})")
-    optimizer = torch.optim.Adam(
-        model.parameters(), lr=cfg.training.learning_rate
-    )
-
-    log.info("Instantiating loss function.")
-    criterion = hydra.utils.instantiate(cfg.training.loss)
-
-    # --- 6. Set Up Logging ---
-    # TODO: Initialize W&B or TensorBoard logger based on 'cfg.logging'
-    log.info(f"Using logger: {cfg.logging.logger_name} (placeholder)")
-
-    resume_enabled = bool(OmegaConf.select(cfg, "training.resume.enabled", default=False))
-    resume_override = OmegaConf.select(cfg, "training.resume.state_path", default=None)
-
-    resume_state, resume_state_path = load_resume_state(
-        cfg=cfg,
-        resume_enabled=resume_enabled,
-        default_state_path=state_path,
-        override_path=resume_override,
-    )
-
-    if resume_enabled and resume_state is None:
-        latest_state = _find_latest_state(cfg, exclude_run_dir=run_dir)
-        if latest_state and latest_state != resume_state_path:
-            try:
-                resume_state = torch_load_full(latest_state)
-                resume_state_path = latest_state
-            except Exception as exc:
-                log.warning("Failed to load fallback resume checkpoint at %s: %s", latest_state, exc)
-
-    start_epoch = 1
-    best_val_auroc = 0.0
-    epochs_no_improve = 0
-    best_model_state: Optional[Any] = None
-
-    if resume_state:
-        model_state = resume_state.get("model")
-        optimizer_state = resume_state.get("optimizer")
-        if model_state:
-            model.load_state_dict(model_state)
-        if optimizer_state:
-            optimizer.load_state_dict(optimizer_state)
-
-        start_epoch = int(resume_state.get("epoch", 0)) + 1
-        best_val_auroc = float(resume_state.get("best_val_auroc", 0.0))
-        epochs_no_improve = int(resume_state.get("epochs_no_improve", 0))
-        best_model_state = resume_state.get("best_model_state")
-
-        restore_rng_state(resume_state.get("rng_state"))
-
-        log.info(
-            "Resuming training from %s (next epoch=%d, best_val_auroc=%.4f)",
-            resume_state_path,
-            start_epoch,
-            best_val_auroc,
-        )
-    elif resume_enabled:
-        log.info("Resume requested but no checkpoint restored; starting fresh training.")
-
-    # Ensure there is always a state snapshot for the current run, even if we
-    # exit before completing an epoch.
-    save_training_state(
-        path=state_path,
-        epoch=start_epoch - 1,
-        model=model,
-        optimizer=optimizer,
-        best_val_auroc=best_val_auroc,
-        epochs_no_improve=epochs_no_improve,
-        best_model_state=best_model_state,
-    )
-    _update_latest_run_pointer(
+    wandb_handle = init_wandb_run(
         cfg=cfg,
         run_dir=run_dir,
-        checkpoint_path=None,
-        state_path=state_path,
-        best_val_auroc=best_val_auroc,
+        model=model,
+        train_dataset_size=len(dataset_train) if hasattr(dataset_train, "__len__") else None,
+        val_dataset_size=len(dataset_val) if hasattr(dataset_val, "__len__") else None,
     )
+    if wandb_handle:
+        wandb_module, wandb_run = wandb_handle
+    else:
+        resolved_logger_name = OmegaConf.select(cfg, "logging.logger_name", default=None)
+        if resolved_logger_name:
+            log.info("Logger %s configured but W&B run was not started.", resolved_logger_name)
+        else:
+            log.info("Experiment logger disabled via configuration.")
 
-    # --- 7. Run Training Loop ---
-    log.info(
-        "Starting training for %s epochs (beginning at epoch %s).",
-        cfg.training.max_epochs,
-        start_epoch,
-    )
-
-    # Early stopping parameters
-    patience = OmegaConf.select(
-        cfg, "training.early_stopping_patience", default=10
-    )
-    log.info(f"Early stopping patience set to {patience} epochs.")
-    
-    interrupted = False
     try:
-        for epoch in range(start_epoch, cfg.training.max_epochs + 1):
+        # --- 5. Initialize Optimizer and Loss ---
+        log.info(f"Instantiating optimizer (LR: {cfg.training.learning_rate})")
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=cfg.training.learning_rate
+        )
 
-            # Run one epoch of training
-            train_loss = train_epoch(
-                model, dataloader_train, optimizer, criterion, device
-            )
+        log.info("Instantiating loss function.")
+        criterion = hydra.utils.instantiate(cfg.training.loss)
 
-            # Run one epoch of validation
-            val_loss, val_metrics = evaluate_epoch(
-                model, dataloader_val, criterion, device
-            )
+        resume_enabled = bool(OmegaConf.select(cfg, "training.resume.enabled", default=False))
+        resume_override = OmegaConf.select(cfg, "training.resume.state_path", default=None)
 
-            val_auroc = val_metrics["auroc"]
+        resume_state, resume_state_path = load_resume_state(
+            cfg=cfg,
+            resume_enabled=resume_enabled,
+            default_state_path=state_path,
+            override_path=resume_override,
+        )
+
+        if resume_enabled and resume_state is None:
+            latest_state = _find_latest_state(cfg, exclude_run_dir=run_dir)
+            if latest_state and latest_state != resume_state_path:
+                try:
+                    resume_state = torch_load_full(latest_state)
+                    resume_state_path = latest_state
+                except Exception as exc:
+                    log.warning("Failed to load fallback resume checkpoint at %s: %s", latest_state, exc)
+
+        if resume_state:
+            model_state = resume_state.get("model")
+            optimizer_state = resume_state.get("optimizer")
+            if model_state:
+                model.load_state_dict(model_state)
+            if optimizer_state:
+                optimizer.load_state_dict(optimizer_state)
+
+            start_epoch = int(resume_state.get("epoch", 0)) + 1
+            best_val_auroc = float(resume_state.get("best_val_auroc", 0.0))
+            epochs_no_improve = int(resume_state.get("epochs_no_improve", 0))
+            best_model_state = resume_state.get("best_model_state")
+
+            restore_rng_state(resume_state.get("rng_state"))
 
             log.info(
-                f"Epoch {epoch}/{cfg.training.max_epochs} | "
-                f"Train Loss: {train_loss:.4f} | "
-                f"Val Loss: {val_loss:.4f} | "
-                f"Val AUROC: {val_auroc:.4f}"
+                "Resuming training from %s (next epoch=%d, best_val_auroc=%.4f)",
+                resume_state_path,
+                start_epoch,
+                best_val_auroc,
             )
+        elif resume_enabled:
+            log.info("Resume requested but no checkpoint restored; starting fresh training.")
 
-            # --- Early Stopping Check ---
-            if val_auroc > best_val_auroc:
-                best_val_auroc = val_auroc
-                epochs_no_improve = 0
-                # Store the state of the best performing model
-                best_model_state = copy.deepcopy(model.state_dict())
-                log.debug(f"New best val AUROC: {best_val_auroc:.4f}. Resetting patience.")
-            else:
-                epochs_no_improve += 1
-                log.debug(
-                    f"Val AUROC did not improve. Patience: {epochs_no_improve}/{patience}"
-                )
+        # Ensure there is always a state snapshot for the current run, even if we
+        # exit before completing an epoch.
+        save_training_state(
+            path=state_path,
+            epoch=start_epoch - 1,
+            model=model,
+            optimizer=optimizer,
+            best_val_auroc=best_val_auroc,
+            epochs_no_improve=epochs_no_improve,
+            best_model_state=best_model_state,
+        )
+        _update_latest_run_pointer(
+            cfg=cfg,
+            run_dir=run_dir,
+            checkpoint_path=None,
+            state_path=state_path,
+            best_val_auroc=best_val_auroc,
+        )
 
-            save_training_state(
-                path=state_path,
-                epoch=epoch,
-                model=model,
-                optimizer=optimizer,
-                best_val_auroc=best_val_auroc,
-                epochs_no_improve=epochs_no_improve,
-                best_model_state=best_model_state,
-            )
-            _update_latest_run_pointer(
-                cfg=cfg,
-                run_dir=run_dir,
-                checkpoint_path=None,
-                state_path=state_path,
-                best_val_auroc=best_val_auroc,
-            )
-
-            # Check if patience has been exceeded
-            if epochs_no_improve >= patience:
-                log.info(
-                    f"Early stopping triggered after {patience} epochs "
-                    f"without improvement. Best Val AUROC: {best_val_auroc:.4f}"
-                )
-                break
-    except KeyboardInterrupt:
-        interrupted = True
-        log.info("Training interrupted by user. Latest state saved to: %s", state_path)
-
-    if not interrupted:
-        log.info("Training complete.")
-    else:
-        log.info("Exiting early due to interruption.")
-
-    # --- 8. Save Artifacts ---
-    checkpoint_path = checkpoint_dir_path / "final_model.pt"
-
-    # Save the best model state captured during training
-    if best_model_state:
-        torch.save(best_model_state, checkpoint_path)
+        # --- 7. Run Training Loop ---
         log.info(
-            f"Best model checkpoint (Val AUROC: {best_val_auroc:.4f}) "
-            f"saved to: {checkpoint_path}"
-        )
-    else:
-        # Fallback: Save final model if training ended early or no improvement
-        torch.save(model.state_dict(), checkpoint_path)
-        log.warning(
-            f"Final model checkpoint saved to: {checkpoint_path} "
-            "(No validation improvement was captured)"
+            "Starting training for %s epochs (beginning at epoch %s).",
+            cfg.training.max_epochs,
+            start_epoch,
         )
 
-    _update_latest_run_pointer(
-        cfg=cfg,
-        run_dir=run_dir,
-        checkpoint_path=checkpoint_path,
-        state_path=state_path,
-        best_val_auroc=best_val_auroc,
-    )
+        # Early stopping parameters
+        patience = OmegaConf.select(
+            cfg, "training.early_stopping_patience", default=10
+        )
+        log.info(f"Early stopping patience set to {patience} epochs.")
 
-    if interrupted:
-        raise KeyboardInterrupt
+        try:
+            for epoch in range(start_epoch, cfg.training.max_epochs + 1):
 
-    # Return the best validation metric
-    return best_val_auroc
+                # Run one epoch of training
+                train_loss = train_epoch(
+                    model, dataloader_train, optimizer, criterion, device
+                )
+
+                # Run one epoch of validation
+                val_loss, val_metrics = evaluate_epoch(
+                    model,
+                    dataloader_val,
+                    criterion,
+                    device,
+                    label_names=list(cfg.training.target_labels),
+                )
+
+                val_auroc = float(val_metrics.get("auroc", 0.0))
+
+                log.info(
+                    f"Epoch {epoch}/{cfg.training.max_epochs} | "
+                    f"Train Loss: {train_loss:.4f} | "
+                    f"Val Loss: {val_loss:.4f} | "
+                    f"Val AUROC: {val_auroc:.4f}"
+                )
+
+                prev_best = best_val_auroc
+                improved = val_auroc > prev_best
+
+                # --- Early Stopping Check ---
+                if improved:
+                    best_val_auroc = val_auroc
+                    epochs_no_improve = 0
+                    # Store the state of the best performing model
+                    best_model_state = copy.deepcopy(model.state_dict())
+                    log.debug(f"New best val AUROC: {best_val_auroc:.4f}. Resetting patience.")
+                else:
+                    epochs_no_improve += 1
+                    log.debug(
+                        f"Val AUROC did not improve. Patience: {epochs_no_improve}/{patience}"
+                    )
+
+                wandb_payload: Optional[Dict[str, Any]] = None
+                if wandb_run:
+                    wandb_payload = build_epoch_payload(
+                        epoch=epoch,
+                        train_loss=train_loss,
+                        val_loss=val_loss,
+                        val_metrics=val_metrics,
+                        best_val_auroc=best_val_auroc,
+                        epochs_no_improve=epochs_no_improve,
+                        improved=improved,
+                    )
+
+                save_training_state(
+                    path=state_path,
+                    epoch=epoch,
+                    model=model,
+                    optimizer=optimizer,
+                    best_val_auroc=best_val_auroc,
+                    epochs_no_improve=epochs_no_improve,
+                    best_model_state=best_model_state,
+                )
+                _update_latest_run_pointer(
+                    cfg=cfg,
+                    run_dir=run_dir,
+                    checkpoint_path=None,
+                    state_path=state_path,
+                    best_val_auroc=best_val_auroc,
+                )
+
+                # Check if patience has been exceeded
+                stop_early = epochs_no_improve >= patience
+                if stop_early:
+                    log.info(
+                        f"Early stopping triggered after {patience} epochs "
+                        f"without improvement. Best Val AUROC: {best_val_auroc:.4f}"
+                    )
+                    if wandb_payload is not None:
+                        wandb_payload["events/early_stopping"] = 1
+
+                if wandb_run and wandb_payload is not None:
+                    log_wandb_metrics(wandb_module, wandb_payload, step=epoch)
+
+                if stop_early:
+                    break
+        except KeyboardInterrupt:
+            interrupted = True
+            log.info("Training interrupted by user. Latest state saved to: %s", state_path)
+
+        if not interrupted:
+            log.info("Training complete.")
+        else:
+            log.info("Exiting early due to interruption.")
+
+        # --- 8. Save Artifacts ---
+        checkpoint_path = checkpoint_dir_path / "final_model.pt"
+
+        # Save the best model state captured during training
+        if best_model_state:
+            torch.save(best_model_state, checkpoint_path)
+            log.info(
+                f"Best model checkpoint (Val AUROC: {best_val_auroc:.4f}) "
+                f"saved to: {checkpoint_path}"
+            )
+        else:
+            # Fallback: Save final model if training ended early or no improvement
+            torch.save(model.state_dict(), checkpoint_path)
+            log.warning(
+                f"Final model checkpoint saved to: {checkpoint_path} "
+                "(No validation improvement was captured)"
+            )
+
+        _update_latest_run_pointer(
+            cfg=cfg,
+            run_dir=run_dir,
+            checkpoint_path=checkpoint_path,
+            state_path=state_path,
+            best_val_auroc=best_val_auroc,
+        )
+
+        if interrupted:
+            raise KeyboardInterrupt
+
+        # Return the best validation metric
+        return best_val_auroc
+    finally:
+        finalize_wandb_run(wandb_module, wandb_run, best_val_auroc, interrupted)
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config.yaml")
