@@ -27,8 +27,8 @@ class FeatureDataset(Dataset):
         manifest_path: str,
         data_root: str,
         target_labels: List[str],
-        visual_feature_col: Optional[str] = None,
-        text_feature_col: Optional[str] = None,
+    visual_feature_col: Optional[str] = None,
+    text_feature_col: Optional[str] = None,
         preload: bool = False,
     ):
         """
@@ -147,7 +147,9 @@ class FeatureDataset(Dataset):
         progress.close()
         log.info("Finished preloading dataset into memory.")
 
-    def _load_feature(self, relative_path: str) -> torch.Tensor:
+    def _load_feature(
+        self, relative_path: str
+    ) -> torch.Tensor:
         """Load a feature tensor from a file, supporting .pt, .npy, and .npz.
 
         The manifest may contain paths with mixed separators or leading
@@ -191,6 +193,21 @@ class FeatureDataset(Dataset):
                         return tt.to(dtype=torch.float32)
             raise ValueError(f"Loaded .pt file at {path} did not contain a tensor")
 
+        def _to_feature_vector(arr: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+            """Convert loaded arrays into a 1D numpy vector."""
+            if isinstance(arr, torch.Tensor):
+                np_arr = arr.detach().cpu().numpy()
+            else:
+                np_arr = np.asarray(arr)
+
+            np_arr = np.squeeze(np_arr)
+
+            if np_arr.ndim == 0:
+                return np_arr.reshape(1)
+            if np_arr.ndim > 1:
+                return np_arr.reshape(-1)
+            return np_arr
+
         def _load_npy(path: str) -> torch.Tensor:
             arr = np.load(path)
             # if np.load returned an NpzFile-like object, use first entry
@@ -199,8 +216,7 @@ class FeatureDataset(Dataset):
                 if not keys:
                     raise ValueError(f".npy/.npz at {path} contains no arrays")
                 arr = arr[keys[0]]
-            # apply pooling/flatten heuristics to turn pre-pooling maps into vectors
-            vec = _pool_to_vector(arr)
+            vec = _to_feature_vector(arr)
             return torch.tensor(vec, dtype=torch.float32)
 
         def _load_npz(path: str) -> torch.Tensor:
@@ -212,7 +228,7 @@ class FeatureDataset(Dataset):
                 arr = npz[keys[0]]
             else:
                 arr = npz
-            vec = _pool_to_vector(arr)
+            vec = _to_feature_vector(arr)
             return torch.tensor(vec, dtype=torch.float32)
 
         loaders = {
@@ -223,50 +239,6 @@ class FeatureDataset(Dataset):
         }
 
         base, ext = os.path.splitext(candidate)
-
-        def _pool_to_vector(x: Union[np.ndarray, torch.Tensor]):
-            """Convert multi-dim feature maps to a 1D vector.
-
-            Heuristics:
-            - squeeze singleton dims
-            - if 1D, return as-is
-            - if 2D, flatten
-            - if 3D: try to detect channel-first (C,H,W) or channel-last (H,W,C)
-              by comparing sizes; perform global average pooling over spatial dims
-              when detection succeeds; otherwise flatten.
-            - if 4D and first dim == 1: recurse on x[0]
-            """
-            # Convert to numpy for easy inspection
-            if isinstance(x, torch.Tensor):
-                arr = x.detach().cpu().numpy()
-            else:
-                arr = np.asarray(x)
-
-            arr = np.squeeze(arr)
-
-            if arr.ndim == 0:
-                return arr.reshape(-1)
-            if arr.ndim == 1:
-                return arr
-            if arr.ndim == 2:
-                return arr.reshape(-1)
-            if arr.ndim == 3:
-                c, h, w = arr.shape
-                # guess channels-first if channel dim is smaller than spatial dims
-                if c <= max(512, min(h, w)):
-                    return arr.mean(axis=(1, 2))
-                # else try channels-last
-                c_last = arr.shape[2]
-                if c_last <= max(512, min(arr.shape[0], arr.shape[1])):
-                    return arr.mean(axis=(0, 1))
-                # fallback
-                return arr.reshape(-1)
-            if arr.ndim == 4:
-                if arr.shape[0] == 1:
-                    return _pool_to_vector(arr[0])
-                return arr.reshape(-1)
-            # fallback flatten
-            return arr.reshape(-1)
 
         # 1) If the exact candidate exists, try to load it with a matching loader
         if os.path.exists(candidate):
