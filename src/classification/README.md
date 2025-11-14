@@ -48,6 +48,8 @@ What this does
 - Trains with PyTorch, computes AUROC as the primary metric, and saves a final checkpoint to the configured checkpoint directory.
 - Persists a `last_state.pt` training snapshot each epoch so interrupted runs can resume where they left off.
 
+If the active config declares a `text_feature` column but the manifest omits it, `FeatureDataset` is reloaded without text features and training continues in visual-only mode. This lets you keep multimodal configs on disk without breaking simple manifests.
+
 Resuming training
 
 - Set `training.resume.enabled=true` to resume from the most recent `last_state.pt` in `paths.checkpoint_dir` (or the path recorded in `paths.latest_run_pointer`).
@@ -71,6 +73,7 @@ Notes and recommendations
 - Requires Python 3.8+ and a compatible PyTorch build for your platform.
 - GPU support is used automatically when available.
 - The `utils/` module is a planned location for helpers (seeding, metrics helpers, logging wrappers).
+- Keep `training.target_labels` and `data.columns.labels` aligned so downstream utilities (e.g., semantic retrieval metrics) see a consistent label schema.
 
 Import examples
 

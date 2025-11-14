@@ -172,12 +172,13 @@ def train_model(cfg: DictConfig) -> float:
             )
 
     # Common dataset args
+    text_feature_col = OmegaConf.select(cfg, "data.columns.text_feature", default=None)
+
     dataset_args = {
         "data_root": cfg.paths.data_root,
         "target_labels": list(cfg.training.target_labels),
         "visual_feature_col": cfg.data.columns.visual_feature,
-        # We are only doing visual, so text_feature_col is None
-        "text_feature_col": cfg.data.columns.text_feature,
+        "text_feature_col": text_feature_col if text_feature_col else None,
         "preload": bool(preload_features),
     }
     
@@ -192,7 +193,23 @@ def train_model(cfg: DictConfig) -> float:
     train_manifest_path = os.path.normpath(
         os.path.join(cfg.paths.manifest_dir, cfg.data.train_manifest)
     )
-    dataset_train = FeatureDataset(manifest_path=train_manifest_path, **dataset_args)
+    def _load_dataset(manifest_path: str) -> FeatureDataset:
+        try:
+            return FeatureDataset(manifest_path=manifest_path, **dataset_args)
+        except ValueError as exc:
+            text_col = dataset_args.get("text_feature_col")
+            if text_col and "Text feature column" in str(exc):
+                log.info(
+                    "Manifest %s missing text feature column '%s'; reloading without text features.",
+                    manifest_path,
+                    text_col,
+                )
+                fallback_args = dict(dataset_args)
+                fallback_args["text_feature_col"] = None
+                return FeatureDataset(manifest_path=manifest_path, **fallback_args)
+            raise
+
+    dataset_train = _load_dataset(train_manifest_path)
     dataloader_train = DataLoader(dataset_train, shuffle=True, **loader_args)
     log.info(f"Loaded training data from: {train_manifest_path}")
 
@@ -200,7 +217,7 @@ def train_model(cfg: DictConfig) -> float:
     val_manifest_path = os.path.normpath(
         os.path.join(cfg.paths.manifest_dir, cfg.data.val_manifest)
     )
-    dataset_val = FeatureDataset(manifest_path=val_manifest_path, **dataset_args)
+    dataset_val = _load_dataset(val_manifest_path)
     dataloader_val = DataLoader(dataset_val, shuffle=False, **loader_args)
     log.info(f"Loaded validation data from: {val_manifest_path}")
     

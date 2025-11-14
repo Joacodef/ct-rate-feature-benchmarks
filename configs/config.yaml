@@ -13,7 +13,7 @@ defaults:
 # Defines the manifest filenames for each data split
 # These files are expected inside 'paths.manifest_dir'
 data:
-  train_manifest: "train_tiny.csv"
+  train_manifest: "train_medium.csv"
   val_manifest: "valid.csv"
   # A list of test manifests to evaluate on
   test_manifests:
@@ -25,7 +25,7 @@ data:
 paths:
   # ====DATA PATHS====
   # Root directory that contains feature files used by the datasets.
-  data_root: "data/features"
+  data_root: "data/features/CT-CLIP_v2_medium"
   # Directory that stores train/val/test manifest CSVs.
   manifest_dir: "data/manifests"
 

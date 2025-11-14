@@ -9,7 +9,7 @@ The configuration system is designed to be composable. The main `config.yaml` fi
 1.  **Main Config (`config.yaml`)**: This file defines the default experiment setup. It uses a `defaults` list to specify which "Configuration Groups" to load.
 
 2.  **Configuration Groups (Sub-directories)**:
-    * **`data/`**: Contains `.yaml` files that define *how* to load data (e.g., which features to use, which columns to read).
+    * **`data/`**: Contains `.yaml` files that define *how* to load data (e.g., which features to use, which columns to read). Use `data.columns.labels` when you want scripts such as `scripts/analyze_alignment.py` to compute semantic retrieval metrics.
     * **`model/`**: Contains `.yaml` files that define a specific model's architecture and hyperparameters.
 
 ## Running Experiments
@@ -31,12 +31,17 @@ The power of this system is in swapping components from the command line. If you
 ```bash
 # This command loads:
 # 1. config.yaml
-# 2. data/multimodal_features.yaml  <-- SWAPPED
-# 3. model/mlp_multimodal.yaml      <-- SWAPPED
+# 2. data/multimodal_features.yaml 
+# 3. model/mlp_multimodal.yaml      
 python src/classification/train.py data=multimodal_features model=mlp_multimodal
 ```
 
 This composable approach allows us to define and benchmark new models or data-handling strategies simply by adding new `.yaml` files.
+
+### Notes on optional columns
+
+- You can keep `data.columns.text_feature` in a config even if the active manifest lacks that column; the dataset loader will fall back to visual-only mode automatically.
+- The `training.target_labels` list must align with the columns declared in `data.columns.labels` for label-aware features or metrics.
 
 ## Resuming a Run
 

@@ -22,6 +22,7 @@ ct-rate-feature-benchmarks/
 │  ├─ metadata/
 │  └─ radiology_text_reports/
 ├─ scripts/
+│  ├─ analyze_alignment.py
 │  └─ prepare_manifests.py
 ├─ src/
 │  ├─ classification/
@@ -103,8 +104,9 @@ Top-level config: `configs/config.yaml`.
 Data manifest expectations (see `configs/data/default_features.yaml`):
 
 - Column `visual_feature_path` stores the relative path to each sample’s visual feature file, relative to `paths.data_root`.
+- Column `text_feature_path` is optional. Training automatically falls back to visual-only mode if the column is absent, but keep the key in the config if you plan to add text features later.
 - Label columns must match `training.target_labels`.
-- Text feature support is optional and disabled by default (`text_feature: null`).
+- Text feature support is optional. The default config exposes a `text_feature_path` column, and the loader will automatically drop it if the manifest does not provide the field.
 
 ## Data layout
 
@@ -122,6 +124,16 @@ Provide split manifests in `paths.manifest_dir` (defaults to `data/manifests`):
 - `test_manual_all.csv`, `test_manual_train.csv`, `test_manual_valid.csv`
 
 The repository includes helper data and scripts under `data/` and `scripts/` for preparing and inspecting manifests (see `scripts/prepare_manifests.py`).
+
+## Alignment analysis
+
+Analyze cross-modal retrieval quality with the Hydra-enabled script in `scripts/analyze_alignment.py`.
+
+```powershell
+python .\scripts\analyze_alignment.py data.train_manifest="train_medium.csv"
+```
+
+The script loads precomputed features, builds an instance-level ground-truth mask by trimming reconstruction suffixes (for example `train_2_a_1` → `train_2_a`), and reports Recall@K plus paired/unpaired similarity stats. If the configured manifest exposes label columns (`data.columns.labels`), it also emits "semantic" metrics that count any pair sharing the exact same label vector as correct (useful when multiple reconstructions or modalities share findings).
 
 ## Testing
 

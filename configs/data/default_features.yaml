@@ -19,7 +19,7 @@ columns:
   
   # The text feature column is explicitly set to null, as this
   # default configuration is for visual-only models.
-  text_feature: null
+  text_feature: "text_feature_path"  # Set to null or remove if not used
   
   # The list of target labels is read directly from the main
   # config file (training.target_labels). This key confirms
