@@ -16,6 +16,10 @@ defaults:
 data:
   train_manifest: "train.csv"
   val_manifest: "valid.csv"
+  auto_split:
+    enabled: false
+    val_fraction: 0.1
+    stratify: true
   # A list of test manifests to evaluate on
   test_manifests:
     - "test_manual_all.csv"

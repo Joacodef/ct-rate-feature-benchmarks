@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import hydra
+import pandas as pd
 import torch
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
@@ -24,7 +25,8 @@ from common.train import (
     save_training_state,
     torch_load_full,
 )
-from torch.utils.data import DataLoader
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, Subset
 
 from .loops import evaluate_epoch, train_epoch
 
@@ -210,16 +212,96 @@ def train_model(cfg: DictConfig) -> float:
             raise
 
     dataset_train = _load_dataset(train_manifest_path)
-    dataloader_train = DataLoader(dataset_train, shuffle=True, **loader_args)
     log.info(f"Loaded training data from: {train_manifest_path}")
 
-    # Instantiate Validation Loader
-    val_manifest_path = os.path.normpath(
-        os.path.join(cfg.paths.manifest_dir, cfg.data.val_manifest)
-    )
-    dataset_val = _load_dataset(val_manifest_path)
-    dataloader_val = DataLoader(dataset_val, shuffle=False, **loader_args)
-    log.info(f"Loaded validation data from: {val_manifest_path}")
+    auto_split_enabled = bool(OmegaConf.select(cfg, "data.auto_split.enabled", default=False))
+    if auto_split_enabled:
+        val_fraction = float(OmegaConf.select(cfg, "data.auto_split.val_fraction", default=0.1))
+        stratify_enabled = bool(OmegaConf.select(cfg, "data.auto_split.stratify", default=True))
+        group_column = "volumename"
+        group_separator = "_"
+        group_remove_last = True
+        if not 0.0 < val_fraction < 1.0:
+            raise ValueError("data.auto_split.val_fraction must be between 0 and 1.")
+
+        manifest_df = dataset_train.manifest
+        label_cols = list(cfg.training.target_labels)
+        stratify_labels = None
+
+        if group_column not in manifest_df.columns:
+            raise ValueError(
+                f"Auto-split requires '{group_column}' column in the manifest."
+            )
+
+        group_series = manifest_df[group_column].astype(str)
+        if group_remove_last:
+            group_keys = group_series.str.rsplit(str(group_separator), n=1).str[0]
+        else:
+            group_keys = group_series
+
+        label_frame = manifest_df[label_cols].fillna(0).astype(int)
+        group_label_frame = (
+            pd.concat([group_keys.rename("group_key"), label_frame], axis=1)
+            .groupby("group_key", sort=False)
+            .max()
+        )
+
+        if stratify_enabled:
+            if len(label_cols) == 1:
+                stratify_labels = group_label_frame.iloc[:, 0]
+            else:
+                stratify_labels = group_label_frame.astype(str).agg("|".join, axis=1)
+
+        try:
+            train_groups, val_groups = train_test_split(
+                group_label_frame.index.values,
+                test_size=val_fraction,
+                random_state=cfg.utils.seed,
+                shuffle=True,
+                stratify=stratify_labels,
+            )
+        except ValueError as exc:
+            log.warning(
+                "Grouped stratified split failed (%s); falling back to random split.",
+                exc,
+            )
+            train_groups, val_groups = train_test_split(
+                group_label_frame.index.values,
+                test_size=val_fraction,
+                random_state=cfg.utils.seed,
+                shuffle=True,
+                stratify=None,
+            )
+
+        train_mask = group_keys.isin(train_groups)
+        val_mask = group_keys.isin(val_groups)
+        train_idx = manifest_df.index[train_mask].values
+        val_idx = manifest_df.index[val_mask].values
+        log.info(
+            "Auto-split grouped by '%s' (%d groups).",
+            group_column,
+            group_label_frame.shape[0],
+        )
+
+        dataset_val = Subset(dataset_train, val_idx)
+        dataset_train = Subset(dataset_train, train_idx)
+        dataloader_train = DataLoader(dataset_train, shuffle=True, **loader_args)
+        dataloader_val = DataLoader(dataset_val, shuffle=False, **loader_args)
+        log.info(
+            "Auto-split enabled: %d train / %d val (val_fraction=%.2f).",
+            len(train_idx),
+            len(val_idx),
+            val_fraction,
+        )
+    else:
+        dataloader_train = DataLoader(dataset_train, shuffle=True, **loader_args)
+        # Instantiate Validation Loader
+        val_manifest_path = os.path.normpath(
+            os.path.join(cfg.paths.manifest_dir, cfg.data.val_manifest)
+        )
+        dataset_val = _load_dataset(val_manifest_path)
+        dataloader_val = DataLoader(dataset_val, shuffle=False, **loader_args)
+        log.info(f"Loaded validation data from: {val_manifest_path}")
     
     # --- 4. Initialize Model ---
     # We can now safely log the model_name from the config
