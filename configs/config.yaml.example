@@ -1,7 +1,7 @@
 # @package _global_
 
 # This is the main Hydra configuration file.
-# It defines the default experiment setup.
+# It defines the default experiment setup. sdfs
 
 defaults:
   - data: default_features
