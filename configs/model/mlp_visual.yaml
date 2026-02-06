@@ -22,7 +22,7 @@ params:
   # This example defines two hidden layers:
   # 1st: 512 -> 256
   # 2nd: 256 -> 128
-  hidden_dims: [256, 128]
+  hidden_dims: [1024]
 
   # Dropout probability to apply after each hidden layer
   dropout: 0.35

@@ -36,6 +36,9 @@ log = logging.getLogger(__name__)
 # Define the K values for recall@k as a single source of truth
 TOP_K_VALUES = [1, 5, 10, 50]
 
+# Define K values for NDCG metric
+NDCG_K_VALUES = [5, 10, 50]
+
 @torch.no_grad()
 def calculate_metrics(
     similarity_matrix: torch.Tensor,
@@ -69,17 +72,38 @@ def calculate_metrics(
 
     # --- Mean Similarities (Based on GT Mask) ---
 
-    paired_values = similarity_matrix[gt_mask]
-    if paired_values.numel():
-        mean_paired_similarity = paired_values.mean().item()
-    else:
-        mean_paired_similarity = float("nan")
+    # We must differentiate between instance-level (prefix == "") and
+    # semantic-level (prefix != "") similarity calculation.
+    # Instance-level compares N-to-N exact pairs (the diagonal).
+    # Semantic-level compares N-to-N semantic matches (the gt_mask).
+    if prefix:
+        # Semantic-level: Use the gt_mask
+        paired_values = similarity_matrix[gt_mask]
+        if paired_values.numel():
+            mean_paired_similarity = paired_values.mean().item()
+        else:
+            mean_paired_similarity = float("nan")
 
-    unpaired_values = similarity_matrix[~gt_mask]
-    if unpaired_values.numel():
-        mean_unpaired_similarity = unpaired_values.mean().item()
+        unpaired_values = similarity_matrix[~gt_mask]
+        if unpaired_values.numel():
+            mean_unpaired_similarity = unpaired_values.mean().item()
+        else:
+            mean_unpaired_similarity = float("nan")
     else:
-        mean_unpaired_similarity = float("nan")
+        # Instance-level: Use the diagonal (N exact pairs)
+        paired_values = similarity_matrix.diag()
+        mean_paired_similarity = paired_values.mean().item()
+
+        # Use all non-diagonal elements for unpaired (N*N - N elements)
+        unpaired_mask = torch.ones_like(
+            similarity_matrix, dtype=torch.bool
+        ).fill_diagonal_(False)
+        
+        unpaired_values = similarity_matrix[unpaired_mask]
+        if unpaired_values.numel():
+            mean_unpaired_similarity = unpaired_values.mean().item()
+        else:
+            mean_unpaired_similarity = float("nan")
 
     # --- Retrieval Metrics (Recall@K) ---
     metrics = {}
@@ -105,7 +129,7 @@ def calculate_metrics(
     ).indices
     t_to_v_hits = gt_mask.T.gather(dim=1, index=t_to_v_top_k_indices.T)
 
-    # Calculate metrics for each k
+    # Calculate Recall@K for each k
     for k in TOP_K_VALUES:
         if k > max_k:
             continue
@@ -115,6 +139,144 @@ def calculate_metrics(
 
         t_to_v_recall_at_k = t_to_v_hits[:, :k].any(dim=1).float().mean().item()
         metrics[f"{prefix}t_to_v_recall_at_{k}"] = t_to_v_recall_at_k
+
+    # --- Mean Reciprocal Rank (MRR) ---
+    # V->T MRR: For each visual query, find rank of first correct text match
+    v_to_t_ranks = torch.where(v_to_t_hits)[1]  # Get column indices of hits
+    v_to_t_first_ranks = torch.full((num_samples,), max_k + 1, dtype=torch.long, device=similarity_matrix.device)
+    
+    # For each sample, find the minimum rank (first occurrence)
+    for i in tqdm(range(num_samples), desc="Computing V->T MRR", leave=False):
+        sample_hits = torch.where(v_to_t_hits[i])[0]
+        if sample_hits.numel() > 0:
+            v_to_t_first_ranks[i] = sample_hits[0]
+    
+    # Calculate reciprocal rank (add 1 since ranks are 0-indexed)
+    v_to_t_reciprocal_ranks = 1.0 / (v_to_t_first_ranks.float() + 1.0)
+    v_to_t_reciprocal_ranks[v_to_t_first_ranks > max_k] = 0.0  # No hit found
+    v_to_t_mrr = v_to_t_reciprocal_ranks.mean().item()
+    metrics[f"{prefix}v_to_t_mrr"] = v_to_t_mrr
+
+    # T->V MRR: For each text query, find rank of first correct visual match
+    t_to_v_ranks = torch.where(t_to_v_hits)[1]
+    t_to_v_first_ranks = torch.full((num_samples,), max_k + 1, dtype=torch.long, device=similarity_matrix.device)
+    
+    for i in tqdm(range(num_samples), desc="Computing T->V MRR", leave=False):
+        sample_hits = torch.where(t_to_v_hits[i])[0]
+        if sample_hits.numel() > 0:
+            t_to_v_first_ranks[i] = sample_hits[0]
+    
+    t_to_v_reciprocal_ranks = 1.0 / (t_to_v_first_ranks.float() + 1.0)
+    t_to_v_reciprocal_ranks[t_to_v_first_ranks > max_k] = 0.0
+    t_to_v_mrr = t_to_v_reciprocal_ranks.mean().item()
+    metrics[f"{prefix}t_to_v_mrr"] = t_to_v_mrr
+
+    # --- Mean Average Precision (MAP) ---
+    # V->T MAP: Average precision for each visual query
+    v_to_t_ap_list = []
+    for i in tqdm(range(num_samples), desc="Computing V->T MAP", leave=False):
+        hits_at_i = v_to_t_hits[i].float()
+        num_relevant = hits_at_i.sum().item()
+        
+        if num_relevant == 0:
+            v_to_t_ap_list.append(0.0)
+            continue
+        
+        # Calculate precision at each position where there's a hit
+        cumsum_hits = torch.cumsum(hits_at_i, dim=0)
+        ranks = torch.arange(1, max_k + 1, device=similarity_matrix.device, dtype=torch.float32)
+        precisions_at_k = cumsum_hits / ranks
+        
+        # Average precision: mean of precisions at relevant positions
+        ap = (precisions_at_k * hits_at_i).sum().item() / num_relevant
+        v_to_t_ap_list.append(ap)
+    
+    v_to_t_map = sum(v_to_t_ap_list) / len(v_to_t_ap_list) if v_to_t_ap_list else 0.0
+    metrics[f"{prefix}v_to_t_map"] = v_to_t_map
+
+    # T->V MAP: Average precision for each text query
+    t_to_v_ap_list = []
+    for i in tqdm(range(num_samples), desc="Computing T->V MAP", leave=False):
+        hits_at_i = t_to_v_hits[i].float()
+        num_relevant = hits_at_i.sum().item()
+        
+        if num_relevant == 0:
+            t_to_v_ap_list.append(0.0)
+            continue
+        
+        cumsum_hits = torch.cumsum(hits_at_i, dim=0)
+        ranks = torch.arange(1, max_k + 1, device=similarity_matrix.device, dtype=torch.float32)
+        precisions_at_k = cumsum_hits / ranks
+        
+        ap = (precisions_at_k * hits_at_i).sum().item() / num_relevant
+        t_to_v_ap_list.append(ap)
+    
+    t_to_v_map = sum(t_to_v_ap_list) / len(t_to_v_ap_list) if t_to_v_ap_list else 0.0
+    metrics[f"{prefix}t_to_v_map"] = t_to_v_map
+
+    # --- Normalized Discounted Cumulative Gain (NDCG@K) ---
+    for k in NDCG_K_VALUES:
+        if k > max_k:
+            continue
+        
+        # V->T NDCG@K
+        v_to_t_dcg_list = []
+        v_to_t_idcg_list = []
+        
+        for i in tqdm(range(num_samples), desc=f"Computing V->T NDCG@{k}", leave=False):
+            hits_at_i = v_to_t_hits[i, :k].float()
+            num_relevant = v_to_t_hits[i].sum().item()
+            
+            # DCG: sum of rel / log2(rank + 1)
+            ranks = torch.arange(1, k + 1, device=similarity_matrix.device, dtype=torch.float32)
+            dcg = (hits_at_i / torch.log2(ranks + 1)).sum().item()
+            v_to_t_dcg_list.append(dcg)
+            
+            # IDCG: ideal DCG (all relevant items at top)
+            num_relevant_at_k = min(num_relevant, k)
+            if num_relevant_at_k > 0:
+                ideal_hits = torch.zeros(k, device=similarity_matrix.device)
+                ideal_hits[:int(num_relevant_at_k)] = 1.0
+                idcg = (ideal_hits / torch.log2(ranks + 1)).sum().item()
+                v_to_t_idcg_list.append(idcg)
+            else:
+                v_to_t_idcg_list.append(0.0)
+        
+        # NDCG = DCG / IDCG, handle division by zero
+        v_to_t_ndcg_values = [
+            dcg / idcg if idcg > 0 else 0.0
+            for dcg, idcg in zip(v_to_t_dcg_list, v_to_t_idcg_list)
+        ]
+        v_to_t_ndcg = sum(v_to_t_ndcg_values) / len(v_to_t_ndcg_values) if v_to_t_ndcg_values else 0.0
+        metrics[f"{prefix}v_to_t_ndcg_at_{k}"] = v_to_t_ndcg
+        
+        # T->V NDCG@K
+        t_to_v_dcg_list = []
+        t_to_v_idcg_list = []
+        
+        for i in tqdm(range(num_samples), desc=f"Computing T->V NDCG@{k}", leave=False):
+            hits_at_i = t_to_v_hits[i, :k].float()
+            num_relevant = t_to_v_hits[i].sum().item()
+            
+            ranks = torch.arange(1, k + 1, device=similarity_matrix.device, dtype=torch.float32)
+            dcg = (hits_at_i / torch.log2(ranks + 1)).sum().item()
+            t_to_v_dcg_list.append(dcg)
+            
+            num_relevant_at_k = min(num_relevant, k)
+            if num_relevant_at_k > 0:
+                ideal_hits = torch.zeros(k, device=similarity_matrix.device)
+                ideal_hits[:int(num_relevant_at_k)] = 1.0
+                idcg = (ideal_hits / torch.log2(ranks + 1)).sum().item()
+                t_to_v_idcg_list.append(idcg)
+            else:
+                t_to_v_idcg_list.append(0.0)
+        
+        t_to_v_ndcg_values = [
+            dcg / idcg if idcg > 0 else 0.0
+            for dcg, idcg in zip(t_to_v_dcg_list, t_to_v_idcg_list)
+        ]
+        t_to_v_ndcg = sum(t_to_v_ndcg_values) / len(t_to_v_ndcg_values) if t_to_v_ndcg_values else 0.0
+        metrics[f"{prefix}t_to_v_ndcg_at_{k}"] = t_to_v_ndcg
 
     return metrics
 
@@ -139,6 +301,11 @@ def analyze_alignment(cfg: DictConfig) -> None:
     grouping_col = OmegaConf.select(
         cfg, "data.columns.grouping_col", default="volumename"
     )
+    
+    # Option to filter out normal cases (all labels zero)
+    filter_normal_cases = OmegaConf.select(
+        cfg, "analysis.filter_normal_cases", default=False
+    )
 
     if not visual_col or not text_col:
         raise ValueError("Missing 'data.columns.visual_feature' or '...text_feature'.")
@@ -159,6 +326,7 @@ def analyze_alignment(cfg: DictConfig) -> None:
     log.info(f"Using visual feature column: '{visual_col}'")
     log.info(f"Using text feature column:   '{text_col}'")
     log.info(f"Using grouping string column (to parse): '{grouping_col}'")
+    log.info(f"Filter normal cases (all labels zero): {filter_normal_cases}")
     if label_cols:
         log.info(f"Semantic metrics enabled with {len(label_cols)} label columns.")
     else:
@@ -288,6 +456,37 @@ def analyze_alignment(cfg: DictConfig) -> None:
             return
 
         log.info(f"Label tensor shape: {labels_tensor.shape}")
+    
+    # --- Filter normal cases if requested ---
+    if filter_normal_cases:
+        if labels_tensor is None:
+            log.warning(
+                "filter_normal_cases=True but no labels loaded. "
+                "Cannot filter normal cases. Proceeding with all samples."
+            )
+        else:
+            log.info("Filtering out normal cases (samples with all labels = 0)...")
+            # Find samples where at least one label is non-zero
+            has_pathology = labels_tensor.any(dim=1)
+            num_pathology_cases = has_pathology.sum().item()
+            num_normal_cases = (~has_pathology).sum().item()
+            
+            log.info(f"  Cases with pathology: {num_pathology_cases}")
+            log.info(f"  Normal cases (filtered): {num_normal_cases}")
+            
+            if num_pathology_cases == 0:
+                log.error("No cases with pathology found after filtering. Cannot proceed.")
+                return
+            
+            # Filter all tensors and lists
+            V = V[has_pathology]
+            T = T[has_pathology]
+            labels_tensor = labels_tensor[has_pathology]
+            all_grouping_strings = [s for i, s in enumerate(all_grouping_strings) if has_pathology[i]]
+            
+            log.info(f"After filtering - Visual features shape: {V.shape}")
+            log.info(f"After filtering - Text features shape: {T.shape}")
+            log.info(f"After filtering - Grouping strings: {len(all_grouping_strings)}")
 
     # --- 5. Compute Similarity Matrix ---
     log.info("Calculating L2-normalized features...")
@@ -356,50 +555,71 @@ def analyze_alignment(cfg: DictConfig) -> None:
         )
 
     # --- 8. Log Results ---
-    log.info("--- Alignment Analysis Results ---")
-    log.info("Instance-level metrics (parsed grouping IDs)")
-    log.info(f"Samples Analyzed: {metrics.get('samples_analyzed', 0)}")
-    log.info(
-        f"Mean Paired Similarity (Instance):   {metrics.get('mean_paired_similarity', float('nan')):.6f}"
-    )
-    log.info(
-        f"Mean Unpaired Similarity (Instance): {metrics.get('mean_unpaired_similarity', float('nan')):.6f}"
-    )
+    log.info("="*70)
+    log.info("ALIGNMENT ANALYSIS RESULTS")
+    log.info("="*70)
+    
+    log.info("\n[INSTANCE-LEVEL METRICS]")
+    log.info(f"  Samples Analyzed: {metrics.get('samples_analyzed', 0)}")
+    log.info(f"  Mean Paired Similarity:   {metrics.get('mean_paired_similarity', float('nan')):.6f}")
+    log.info(f"  Mean Unpaired Similarity: {metrics.get('mean_unpaired_similarity', float('nan')):.6f}")
 
-    log.info("--- Visual-to-Text Retrieval (Instance V->T) ---")
+    log.info("\n[VISUAL -> TEXT RETRIEVAL]")
+    log.info(f"  MRR:        {metrics.get('v_to_t_mrr', 0.0):.4f}")
+    log.info(f"  MAP:        {metrics.get('v_to_t_map', 0.0):.4f}")
+    log.info("  Recall@K:")
     for k in TOP_K_VALUES:
-        metric_name = f"v_to_t_recall_at_{k}"
-        metric_value = metrics.get(metric_name, 0.0)
-        log.info(f"  Recall@{k:<2}:  {metric_value:.4f}")
+        metric_value = metrics.get(f"v_to_t_recall_at_{k}", 0.0)
+        log.info(f"    K={k:<2}:  {metric_value:.4f}")
+    log.info("  NDCG@K:")
+    for k in NDCG_K_VALUES:
+        metric_value = metrics.get(f"v_to_t_ndcg_at_{k}", 0.0)
+        log.info(f"    K={k:<2}:  {metric_value:.4f}")
 
-    log.info("--- Text-to-Visual Retrieval (Instance T->V) ---")
+    log.info("\n[TEXT -> VISUAL RETRIEVAL]")
+    log.info(f"  MRR:        {metrics.get('t_to_v_mrr', 0.0):.4f}")
+    log.info(f"  MAP:        {metrics.get('t_to_v_map', 0.0):.4f}")
+    log.info("  Recall@K:")
     for k in TOP_K_VALUES:
-        metric_name = f"t_to_v_recall_at_{k}"
-        metric_value = metrics.get(metric_name, 0.0)
-        log.info(f"  Recall@{k:<2}:  {metric_value:.4f}")
+        metric_value = metrics.get(f"t_to_v_recall_at_{k}", 0.0)
+        log.info(f"    K={k:<2}:  {metric_value:.4f}")
+    log.info("  NDCG@K:")
+    for k in NDCG_K_VALUES:
+        metric_value = metrics.get(f"t_to_v_ndcg_at_{k}", 0.0)
+        log.info(f"    K={k:<2}:  {metric_value:.4f}")
 
     if semantic_mask is not None:
-        log.info("--- Semantic Alignment (Exact Label Match) ---")
-        log.info(
-            f"Mean Paired Similarity (Semantic):   {metrics.get('semantic_mean_paired_similarity', float('nan')):.6f}"
-        )
-        log.info(
-            f"Mean Unpaired Similarity (Semantic): {metrics.get('semantic_mean_unpaired_similarity', float('nan')):.6f}"
-        )
+        log.info("\n" + "="*70)
+        log.info("[SEMANTIC-LEVEL METRICS] (Exact Label Match)")
+        log.info("="*70)
+        log.info(f"  Mean Paired Similarity:   {metrics.get('semantic_mean_paired_similarity', float('nan')):.6f}")
+        log.info(f"  Mean Unpaired Similarity: {metrics.get('semantic_mean_unpaired_similarity', float('nan')):.6f}")
 
-        log.info("--- Visual-to-Text Retrieval (Semantic V->T) ---")
+        log.info("\n[SEMANTIC VISUAL -> TEXT RETRIEVAL]")
+        log.info(f"  MRR:        {metrics.get('semantic_v_to_t_mrr', 0.0):.4f}")
+        log.info(f"  MAP:        {metrics.get('semantic_v_to_t_map', 0.0):.4f}")
+        log.info("  Recall@K:")
         for k in TOP_K_VALUES:
-            metric_name = f"semantic_v_to_t_recall_at_{k}"
-            metric_value = metrics.get(metric_name, float("nan"))
-            log.info(f"  Recall@{k:<2}:  {metric_value:.4f}")
+            metric_value = metrics.get(f"semantic_v_to_t_recall_at_{k}", float("nan"))
+            log.info(f"    K={k:<2}:  {metric_value:.4f}")
+        log.info("  NDCG@K:")
+        for k in NDCG_K_VALUES:
+            metric_value = metrics.get(f"semantic_v_to_t_ndcg_at_{k}", 0.0)
+            log.info(f"    K={k:<2}:  {metric_value:.4f}")
 
-        log.info("--- Text-to-Visual Retrieval (Semantic T->V) ---")
+        log.info("\n[SEMANTIC TEXT -> VISUAL RETRIEVAL]")
+        log.info(f"  MRR:        {metrics.get('semantic_t_to_v_mrr', 0.0):.4f}")
+        log.info(f"  MAP:        {metrics.get('semantic_t_to_v_map', 0.0):.4f}")
+        log.info("  Recall@K:")
         for k in TOP_K_VALUES:
-            metric_name = f"semantic_t_to_v_recall_at_{k}"
-            metric_value = metrics.get(metric_name, float("nan"))
-            log.info(f"  Recall@{k:<2}:  {metric_value:.4f}")
+            metric_value = metrics.get(f"semantic_t_to_v_recall_at_{k}", float("nan"))
+            log.info(f"    K={k:<2}:  {metric_value:.4f}")
+        log.info("  NDCG@K:")
+        for k in NDCG_K_VALUES:
+            metric_value = metrics.get(f"semantic_t_to_v_ndcg_at_{k}", 0.0)
+            log.info(f"    K={k:<2}:  {metric_value:.4f}")
         
-    log.info("------------------------------------")
+    log.info("\n" + "="*70)
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config.yaml")

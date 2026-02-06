@@ -13,7 +13,7 @@ defaults:
 # Defines the manifest filenames for each data split
 # These files are expected inside 'paths.manifest_dir'
 data:
-  train_manifest: "train_medium.csv"
+  train_manifest: "train.csv"
   val_manifest: "valid.csv"
   # A list of test manifests to evaluate on
   test_manifests:
@@ -25,7 +25,7 @@ data:
 paths:
   # ====DATA PATHS====
   # Root directory that contains feature files used by the datasets.
-  data_root: "data/features/CT-CLIP_v2_medium"
+  data_root: "data/features/CT-CLIP_v2"
   # Directory that stores train/val/test manifest CSVs.
   manifest_dir: "data/manifests"
 
@@ -60,7 +60,7 @@ training:
   num_workers: 0 # Recommended to be 0
   learning_rate: 1e-4
   max_epochs: 5000
-  early_stopping_patience: 50
+  early_stopping_patience: 15
   resume:
     enabled: false
     state_path: null
@@ -80,12 +80,12 @@ training:
     # "Pericardial effusion",
     # "Coronary artery wall calcification",
     # "Hiatal hernia",
-    # "Lymphadenopathy",
+    "Lymphadenopathy",
     # "Emphysema",
     # "Atelectasis",
     "Lung nodule",
     "Lung opacity",
-    # "Pulmonary fibrotic sequela",
+    "Pulmonary fibrotic sequela",
     # "Pleural effusion",
     # "Mosaic attenuation pattern",
     # "Peribronchial thickening",
@@ -97,6 +97,10 @@ training:
 # Utility and reproducibility configuration
 utils:
   seed: 42
+
+# Analysis configuration (for analyze_alignment.py script)
+analysis:
+  filter_normal_cases: false  # Set to true to exclude cases with all labels = 0
 
 # Configuration for experiment tracking (e.g., W&B, TensorBoard)
 logging:
