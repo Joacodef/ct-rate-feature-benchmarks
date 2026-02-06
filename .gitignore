@@ -12,3 +12,7 @@ __pycache__
 outputs/
 
 .vscode/
+
+configs/*.yaml
+
+configs/*/*.yaml

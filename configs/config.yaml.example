@@ -4,11 +4,12 @@
 # It defines the default experiment setup. sdfs
 
 defaults:
+  - _self_
   - data: default_features
   - model: mlp_visual 
   - override hydra/job_logging: default
   - override hydra/hydra_logging: default
-  - _self_
+  
 
 # Defines the manifest filenames for each data split
 # These files are expected inside 'paths.manifest_dir'

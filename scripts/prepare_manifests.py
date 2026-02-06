@@ -36,6 +36,24 @@ def generate_path(volumename: str, prefix: str, suffix: str) -> str:
     return f"{prefix}{volumename}{suffix}"
 
 
+def normalize_key(value: str) -> str:
+    """Normalize a VolumeName by removing a known suffix when present."""
+    if not isinstance(value, str):
+        return value
+    if value.endswith(SUFFIX_TO_REMOVE):
+        return value[: -len(SUFFIX_TO_REMOVE)]
+    return value
+
+
+def base_key_from_full(full_key: str) -> str:
+    """Derive base key by stripping the final reconstruction segment."""
+    if not isinstance(full_key, str):
+        return full_key
+    if "_" not in full_key:
+        return full_key
+    return full_key.rsplit("_", 1)[0]
+
+
 def create_manifest(args):
     """
     Loads master labels, a single split file, and (optionally) reports.
@@ -55,9 +73,42 @@ def create_manifest(args):
         raise ValueError("Invalid labels.csv format")
     
     # Prepare labels merge key
-    labels_df["merge_key"] = labels_df[KEY_COL].str.replace(
-        SUFFIX_TO_REMOVE, "", regex=False
-    )
+    labels_df["merge_key"] = labels_df[KEY_COL].apply(normalize_key)
+
+    # --- 1b. Optionally expand labels to all reconstructions via metadata ---
+    if args.metadata_csv:
+        log.info(f"Loading metadata for reconstruction expansion: {args.metadata_csv}")
+        try:
+            metadata_df = pd.read_csv(args.metadata_csv, usecols=[KEY_COL])
+        except FileNotFoundError:
+            log.error(f"Metadata file not found: {args.metadata_csv}")
+            raise
+        if KEY_COL not in metadata_df.columns:
+            log.error(f"Metadata CSV must contain '{KEY_COL}' column.")
+            raise ValueError("Invalid metadata.csv format")
+
+        metadata_keys_df = metadata_df[[KEY_COL]].copy()
+        metadata_keys_df["full_key"] = metadata_keys_df[KEY_COL].apply(normalize_key)
+        metadata_keys_df["base_key"] = metadata_keys_df["full_key"].apply(base_key_from_full)
+        metadata_keys_df = metadata_keys_df[["base_key", "full_key"]].drop_duplicates()
+
+        expanded_df = pd.merge(
+            labels_df,
+            metadata_keys_df,
+            left_on="merge_key",
+            right_on="base_key",
+            how="left",
+        )
+
+        missing_expansions = expanded_df["full_key"].isna().sum()
+        if missing_expansions:
+            log.warning(
+                "%s labels could not be expanded via metadata; using original keys.",
+                missing_expansions,
+            )
+
+        expanded_df["merge_key"] = expanded_df["full_key"].fillna(expanded_df["merge_key"])
+        labels_df = expanded_df.drop(columns=["base_key", "full_key"])
 
     # --- 2. Load Split File (Required) ---
     log.info(f"Loading split file from: {args.split_csv}")
@@ -71,9 +122,7 @@ def create_manifest(args):
         raise ValueError("Invalid split.csv format")
 
     # Prepare split merge key
-    split_df["merge_key"] = split_df[KEY_COL].str.replace(
-        SUFFIX_TO_REMOVE, "", regex=False
-    )
+    split_df["merge_key"] = split_df[KEY_COL].apply(normalize_key)
     # We only need the key from the split file for the merge
     split_keys_df = split_df[["merge_key"]].drop_duplicates()
 
@@ -89,9 +138,7 @@ def create_manifest(args):
                 raise ValueError("Invalid reports.csv format")
             
             # Prepare reports merge key
-            reports_df["merge_key"] = reports_df[KEY_COL].str.replace(
-                SUFFIX_TO_REMOVE, "", regex=False
-            )
+            reports_df["merge_key"] = reports_df[KEY_COL].apply(normalize_key)
             
             # Identify all columns *except* the key
             report_text_cols = [col for col in reports_df.columns if col not in [KEY_COL]]
@@ -208,6 +255,12 @@ def main():
         type=str,
         default=None,
         help="(Optional) Path to the reports CSV file (e.g., 'all_reports.csv').",
+    )
+    parser.add_argument(
+        "--metadata_csv",
+        type=str,
+        default=None,
+        help="(Optional) Metadata CSV with reconstruction IDs to expand labels.",
     )
     
     # --- Output File ---
