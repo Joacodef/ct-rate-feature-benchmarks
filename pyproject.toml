@@ -30,6 +30,7 @@ dependencies = [
     "pyarrow>=10.0",     # For efficient feature loading (e.g., parquet)
     "hydra-core>=1.3.0", # For experiment configuration management
     "rich>=13.0.0",      # For better terminal logging
+    "optuna>=3.6.0",
 ]
 
 [project.optional-dependencies]

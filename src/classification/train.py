@@ -154,6 +154,7 @@ def train_model(cfg: DictConfig) -> float:
     best_val_auroc = 0.0
     epochs_no_improve = 0
     best_model_state: Optional[Any] = None
+    best_metrics: Optional[Dict[str, Any]] = None
 
     # --- 2. Calculate Dynamic Parameters ---
     # Dynamically determine the number of labels from the config list
@@ -218,6 +219,8 @@ def train_model(cfg: DictConfig) -> float:
     if auto_split_enabled:
         val_fraction = float(OmegaConf.select(cfg, "data.auto_split.val_fraction", default=0.1))
         stratify_enabled = bool(OmegaConf.select(cfg, "data.auto_split.stratify", default=True))
+        split_seed = OmegaConf.select(cfg, "data.auto_split.seed", default=None)
+        split_seed = cfg.utils.seed if split_seed is None else int(split_seed)
         group_column = "volumename"
         group_separator = "_"
         group_remove_last = True
@@ -256,7 +259,7 @@ def train_model(cfg: DictConfig) -> float:
             train_groups, val_groups = train_test_split(
                 group_label_frame.index.values,
                 test_size=val_fraction,
-                random_state=cfg.utils.seed,
+                random_state=split_seed,
                 shuffle=True,
                 stratify=stratify_labels,
             )
@@ -268,7 +271,7 @@ def train_model(cfg: DictConfig) -> float:
             train_groups, val_groups = train_test_split(
                 group_label_frame.index.values,
                 test_size=val_fraction,
-                random_state=cfg.utils.seed,
+                random_state=split_seed,
                 shuffle=True,
                 stratify=None,
             )
@@ -332,11 +335,19 @@ def train_model(cfg: DictConfig) -> float:
         else:
             log.info("Experiment logger disabled via configuration.")
 
+    metrics_path = run_dir / "metrics.jsonl"
+    best_metrics_path = run_dir / "best_metrics.json"
+
     try:
         # --- 5. Initialize Optimizer and Loss ---
-        log.info(f"Instantiating optimizer (LR: {cfg.training.learning_rate})")
+        weight_decay = float(OmegaConf.select(cfg, "training.weight_decay", default=0.0))
+        log.info(
+            "Instantiating optimizer (LR: %s, weight_decay: %s)",
+            cfg.training.learning_rate,
+            weight_decay,
+        )
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=cfg.training.learning_rate
+            model.parameters(), lr=cfg.training.learning_rate, weight_decay=weight_decay
         )
 
         log.info("Instantiating loss function.")
@@ -452,6 +463,16 @@ def train_model(cfg: DictConfig) -> float:
                     epochs_no_improve = 0
                     # Store the state of the best performing model
                     best_model_state = copy.deepcopy(model.state_dict())
+                    best_metrics = {
+                        "epoch": int(epoch),
+                        "train_loss": float(train_loss),
+                        "val_loss": float(val_loss),
+                        "val_metrics": val_metrics,
+                    }
+                    try:
+                        best_metrics_path.write_text(json.dumps(best_metrics, indent=2))
+                    except Exception as exc:
+                        log.warning("Failed to write best_metrics.json: %s", exc)
                     log.debug(f"New best val AUROC: {best_val_auroc:.4f}. Resetting patience.")
                 else:
                     epochs_no_improve += 1
@@ -470,6 +491,19 @@ def train_model(cfg: DictConfig) -> float:
                         epochs_no_improve=epochs_no_improve,
                         improved=improved,
                     )
+
+                metrics_row = {
+                    "epoch": int(epoch),
+                    "train_loss": float(train_loss),
+                    "val_loss": float(val_loss),
+                    "val_metrics": val_metrics,
+                    "best_val_auroc": float(best_val_auroc),
+                }
+                try:
+                    with metrics_path.open("a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(metrics_row) + "\n")
+                except Exception as exc:
+                    log.warning("Failed to append metrics.jsonl: %s", exc)
 
                 save_training_state(
                     path=state_path,
