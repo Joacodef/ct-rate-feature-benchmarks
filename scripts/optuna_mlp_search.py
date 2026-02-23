@@ -7,7 +7,6 @@ validation AUPRC (fallback AUROC) read from each trial output.
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +14,29 @@ from typing import List, Optional
 
 import optuna
 from omegaconf import OmegaConf
+
+
+def _normalize_config_name(config_name: Optional[str]) -> Optional[str]:
+    """Normalize a Hydra config name, accepting accidental file paths.
+
+    Args:
+        config_name: Raw config value passed from CLI.
+
+    Returns:
+        Basename suitable for Hydra ``--config-name`` usage, or ``None``.
+
+    Logic:
+        Hydra ``--config-name`` expects a name relative to ``config_path``.
+        If a file path is provided (e.g., ``./configs/foo.yaml``), reduce it
+        to basename (``foo.yaml``) so downstream subprocess calls succeed.
+    """
+    if not config_name:
+        return None
+
+    raw = config_name.strip().strip("\"'")
+    # Accept either POSIX or Windows path separators.
+    normalized = Path(raw.replace("\\", "/")).name
+    return normalized or raw
 
 
 def _parse_args() -> argparse.Namespace:
@@ -122,15 +144,20 @@ def _resolve_outputs_root(config_name: Optional[str], overrides: List[str]) -> P
 
     # 2) Fallback to config file value.
     if config_name:
-        config_path = Path("configs") / config_name
-        if config_path.exists():
+        candidate_paths = [
+            Path(config_name),
+            Path("configs") / config_name,
+        ]
+        for config_path in candidate_paths:
+            if not config_path.exists():
+                continue
             try:
                 cfg = OmegaConf.load(config_path)
                 resolved = OmegaConf.select(cfg, "paths.outputs_root", default="outputs")
                 if resolved:
                     return Path(str(resolved))
             except Exception:
-                pass
+                continue
 
     # 3) Final default.
     return Path("outputs")
@@ -189,6 +216,7 @@ def main() -> None:
     """
     # 1) Parse and validate inputs.
     args = _parse_args()
+    args.config_name = _normalize_config_name(args.config_name)
     sizes = _parse_sizes(args.sizes)
 
     if args.min_depth < 1 or args.max_depth < args.min_depth:
