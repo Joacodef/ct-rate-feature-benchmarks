@@ -54,7 +54,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sizes",
         type=str,
-        default="64,128,256,512,1024,2048",
+        default="64,128,256,512,1024,2048,4096",
         help="Comma-separated hidden sizes to sample from.",
     )
     parser.add_argument(
