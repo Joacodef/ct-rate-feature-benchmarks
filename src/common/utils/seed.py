@@ -8,7 +8,25 @@ import torch
 
 
 def set_seed(seed: int) -> None:
-    """Seed Python, NumPy, and PyTorch (CPU + CUDA) RNGs."""
+    """Set deterministic random seeds across Python, NumPy, and PyTorch.
+
+    Args:
+        seed: Integer seed value applied to all supported RNG backends.
+
+    Input:
+        Single integer seed used to initialize stochastic components in Python,
+        NumPy, Torch CPU, and (when available) Torch CUDA.
+
+    Returns:
+        ``None``.
+
+    Logic:
+        1. Seed Python's built-in ``random`` module.
+        2. Seed NumPy global RNG.
+        3. Seed Torch CPU RNG and all CUDA devices when CUDA is available.
+        4. Configure cuDNN for deterministic behavior by enabling
+           ``deterministic`` and disabling ``benchmark``.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

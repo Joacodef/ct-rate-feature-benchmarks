@@ -23,7 +23,21 @@ def _build_test_loaders(
     loader_args: Dict,
     manifest_root: str,
 ) -> List[Tuple[str, DataLoader]]:
-    """Create DataLoaders for each configured test manifest."""
+    """Build test dataloaders for each manifest name.
+
+    Args:
+        manifests: Manifest filenames to load.
+        dataset_args: Keyword arguments forwarded to ``FeatureDataset``.
+        loader_args: Keyword arguments forwarded to ``DataLoader``.
+        manifest_root: Base directory containing manifest files.
+
+    Returns:
+        List of ``(manifest_name, dataloader)`` pairs.
+
+    Logic:
+        Resolve each manifest path under ``manifest_root``, construct the
+        dataset and dataloader, and collect them in input order.
+    """
     test_loaders: List[Tuple[str, DataLoader]] = []
     for manifest_name in manifests:
         manifest_path = os.path.normpath(os.path.join(manifest_root, manifest_name))
@@ -35,7 +49,19 @@ def _build_test_loaders(
 
 
 def _resolve_detailed_metrics_dir(cfg: DictConfig) -> str:
-    """Return an absolute directory path for detailed metrics outputs."""
+    """Resolve output directory for detailed per-class metric reports.
+
+    Args:
+        cfg: Hydra/OmegaConf config with optional runtime/output path keys.
+
+    Returns:
+        Absolute path to a ``detailed_metrics`` directory.
+
+    Logic:
+        Check preferred path keys in order (Hydra runtime/output locations
+        first), convert relative paths against ``hydra.runtime.cwd``, then
+        append ``detailed_metrics``. Fall back to ``<cwd>/detailed_metrics``.
+    """
 
     candidate_keys = [
         "hydra.runtime.output_dir",
@@ -63,7 +89,20 @@ def _resolve_detailed_metrics_dir(cfg: DictConfig) -> str:
 
 
 def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
-    """Evaluate a trained model on all configured test manifests."""
+    """Evaluate a checkpointed model across configured test manifests.
+
+    Args:
+        cfg: Hydra/OmegaConf evaluation configuration.
+
+    Returns:
+        Flat metric dictionary keyed by manifest (AUPRC, AUROC, and F1-macro
+        entries for each test manifest).
+
+    Logic:
+        Set seed/device, build datasets and loaders, instantiate model/loss,
+        resolve and load checkpoint, run per-manifest evaluation, aggregate
+        summary metrics, and optionally write detailed per-class JSON reports.
+    """
     log.info("Starting evaluation...")
     log.info("Full configuration:\n%s", OmegaConf.to_yaml(cfg))
 
@@ -177,6 +216,18 @@ def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config.yaml")
 def main(cfg: DictConfig) -> None:
+    """Hydra entrypoint for evaluation runs.
+
+    Args:
+        cfg: Hydra/OmegaConf config injected by ``@hydra.main``.
+
+    Returns:
+        ``None``.
+
+    Logic:
+        Execute ``evaluate_model`` and log/re-raise any exception so calling
+        environments receive a failing exit status.
+    """
     try:
         evaluate_model(cfg)
     except Exception as exc:

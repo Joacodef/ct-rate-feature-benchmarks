@@ -15,11 +15,21 @@ log = logging.getLogger(__name__)
 
 
 class FeatureDataset(Dataset):
-    """
-    A PyTorch Dataset for loading pre-computed features and labels.
+    """PyTorch dataset that serves precomputed feature tensors and labels.
 
-    This dataset reads a manifest file (CSV) to locate features and
-    corresponding labels for a classification or retrieval task.
+    Input:
+        A manifest CSV where each row references feature paths (visual and/or
+        text) and label columns.
+
+    Output:
+        Samples as dictionaries containing one or more feature tensors plus a
+        ``labels`` tensor, suitable for training/evaluation loops.
+
+    Logic:
+        1. Read and validate the manifest schema.
+        2. Optionally preload all tensors into RAM caches.
+        3. On each item request, return cached tensors or lazily load from
+           disk using extension-aware loaders.
     """
 
     def __init__(
@@ -31,23 +41,40 @@ class FeatureDataset(Dataset):
     text_feature_col: Optional[str] = None,
         preload: bool = False,
     ):
-        """
-        Initializes the dataset.
+        """Initialize dataset metadata, validate schema, and optionally preload.
 
         Args:
-            manifest_path: Path to the .csv manifest file.
-            data_root: The absolute base path to the directory
-                       where feature files are stored.
-            target_labels: A list of column names in the manifest
-                           that correspond to the target labels.
-            visual_feature_col: The column name in the manifest that
-                                contains the relative path to the
-                                visual feature file (e.g., .pt).
-            text_feature_col: The column name in the manifest that
-                              contains the relative path to the
-                              text feature file (e.g., .pt).
-            preload: If True, eagerly load all features and labels
-                     into memory during initialisation.
+            manifest_path: Path to the manifest CSV file. Must exist.
+            data_root: Base directory used to resolve relative feature paths.
+                If missing, a warning is logged and loading may later fail.
+            target_labels: Ordered list of manifest column names to use as
+                label targets.
+            visual_feature_col: Optional manifest column containing visual
+                feature paths.
+            text_feature_col: Optional manifest column containing text feature
+                paths.
+            preload: When ``True``, eagerly load configured features and labels
+                into in-memory caches during construction.
+
+        Input:
+            File-system paths and manifest column names defining how each row
+            maps to tensors.
+
+        Returns:
+            ``None``.
+
+        Raises:
+            FileNotFoundError: If ``manifest_path`` does not exist.
+            Exception: Re-raises parsing errors from ``pandas.read_csv``.
+            ValueError: If required feature/label columns are missing in the
+                manifest (via ``_validate_columns``).
+
+        Logic:
+            1. Verify path existence for manifest (error) and data root
+               (warning only).
+            2. Read the manifest into a DataFrame.
+            3. Validate feature and label columns.
+            4. Optionally preload all samples to memory caches.
         """
         super().__init__()
 
@@ -83,9 +110,23 @@ class FeatureDataset(Dataset):
             self._preload_to_memory()
 
     def _validate_columns(self):
-        """
-        Ensures all specified feature and label columns
-        exist in the loaded manifest.
+        """Validate manifest schema against configured feature/label columns.
+
+        Input:
+            Uses in-memory ``self.manifest`` and the configured
+            ``visual_feature_col``, ``text_feature_col``, and ``target_labels``.
+
+        Returns:
+            ``None``.
+
+        Raises:
+            ValueError: If any configured column is absent from manifest.
+
+        Logic:
+            1. Build a set of manifest column names.
+            2. Validate optional feature columns when configured.
+            3. Validate every target label column.
+            4. Log success when all checks pass.
         """
         manifest_cols = set(self.manifest.columns)
         
@@ -105,11 +146,36 @@ class FeatureDataset(Dataset):
         log.info("Manifest columns validated successfully.")
 
     def __len__(self) -> int:
-        """Returns the total number of samples in the dataset."""
+        """Return the number of rows (samples) in the manifest.
+
+        Input:
+            No explicit parameters; reads ``self.manifest``.
+
+        Returns:
+            Total sample count as an integer.
+
+        Logic:
+            Delegate directly to ``len(self.manifest)``.
+        """
         return len(self.manifest)
 
     def _preload_to_memory(self) -> None:
-        """Read all configured features and labels into RAM upfront."""
+        """Eagerly load feature and label tensors for all samples.
+
+        Input:
+            Entire manifest DataFrame plus configured feature columns.
+
+        Returns:
+            ``None``. Populates ``_visual_cache``, ``_text_cache``, and
+            ``_label_cache`` with per-sample tensors.
+
+        Logic:
+            1. Allocate cache lists for enabled modalities and labels.
+            2. Iterate over all rows with a progress bar.
+            3. Load features via ``_load_feature`` and convert labels to
+               ``float32`` tensors.
+            4. Store tensors by index for fast access in ``__getitem__``.
+        """
         total = len(self.manifest)
         log.info(
             "Preloading %d samples from %s into memory.",
@@ -150,12 +216,35 @@ class FeatureDataset(Dataset):
     def _load_feature(
         self, relative_path: str
     ) -> torch.Tensor:
-        """Load a feature tensor from a file, supporting .pt, .npy, and .npz.
+        """Load one feature vector tensor from disk with extension fallback.
 
-        The manifest may contain paths with mixed separators or leading
-        slashes. We normalize the path and treat paths starting with a
-        separator but without a Windows drive letter as relative to
-        `data_root`.
+        Args:
+            relative_path: Path from manifest. May be absolute, relative,
+                mixed-separator, or separator-prefixed without drive letter.
+
+        Input:
+            A path-like value pointing to feature data saved as ``.pt``,
+            ``.pth``, ``.npy``, or ``.npz`` (or another torch-loadable format).
+
+        Returns:
+            A ``torch.float32`` tensor representing the feature vector.
+
+        Raises:
+            FileNotFoundError: If no matching feature file is found after all
+                resolution strategies.
+            ValueError: If content is invalid for expected loaders.
+            Exception: Re-raises loader errors after logging.
+
+        Logic:
+            1. Normalize path text and treat separator-prefixed, drive-less
+               paths as relative to ``data_root``.
+            2. Resolve a candidate absolute path.
+            3. If candidate exists, load with extension-specific loader when
+               available; otherwise try ``torch.load`` fallback.
+            4. If missing, try alternate known extensions sharing same basename.
+            5. As final fallback, scan candidate directory for matching basename
+               with supported extension.
+            6. Log attempts and raise if unresolved.
         """
         # Normalize and coerce to str
         relative_path = os.path.normpath(str(relative_path))
@@ -175,6 +264,27 @@ class FeatureDataset(Dataset):
 
         # Define loaders for known extensions
         def _load_pt(path: str) -> torch.Tensor:
+            """Load tensor data from a PyTorch serialized file.
+
+            Args:
+                path: Absolute path to ``.pt``/``.pth`` file.
+
+            Input:
+                Serialized tensor or dictionary potentially containing tensor
+                entries.
+
+            Returns:
+                1D ``torch.float32`` tensor (squeezed and flattened when
+                needed).
+
+            Raises:
+                ValueError: If the file does not directly or indirectly contain
+                    a tensor value.
+
+            Logic:
+                Prefer direct tensor payload; otherwise search common dictionary
+                keys and normalize discovered tensor shape/dtype.
+            """
             t = torch.load(path, map_location="cpu")
             if isinstance(t, torch.Tensor):
                 # squeeze any singleton leading dims and flatten remaining dims to 1D
@@ -194,7 +304,22 @@ class FeatureDataset(Dataset):
             raise ValueError(f"Loaded .pt file at {path} did not contain a tensor")
 
         def _to_feature_vector(arr: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
-            """Convert loaded arrays into a 1D numpy vector."""
+            """Normalize arrays/tensors into a 1D NumPy feature vector.
+
+            Args:
+                arr: NumPy array or Torch tensor from a file loader.
+
+            Input:
+                Scalar, vector, or higher-dimensional numeric array-like data.
+
+            Returns:
+                1D ``np.ndarray``. Scalars become shape ``(1,)`` and
+                multi-dimensional arrays are flattened.
+
+            Logic:
+                Convert to NumPy, squeeze singleton dimensions, then coerce to
+                a consistent 1D representation.
+            """
             if isinstance(arr, torch.Tensor):
                 np_arr = arr.detach().cpu().numpy()
             else:
@@ -209,6 +334,25 @@ class FeatureDataset(Dataset):
             return np_arr
 
         def _load_npy(path: str) -> torch.Tensor:
+            """Load feature data from ``.npy`` and coerce to float tensor.
+
+            Args:
+                path: Absolute path to NumPy binary file.
+
+            Input:
+                ``.npy`` file content, or an ``NpzFile``-like object returned
+                by ``np.load`` in edge cases.
+
+            Returns:
+                1D ``torch.float32`` feature tensor.
+
+            Raises:
+                ValueError: If loaded archive-like object contains no arrays.
+
+            Logic:
+                Load, extract first available array when archive-like, convert
+                to normalized vector via ``_to_feature_vector``.
+            """
             arr = np.load(path)
             # if np.load returned an NpzFile-like object, use first entry
             if isinstance(arr, np.lib.npyio.NpzFile):
@@ -220,6 +364,25 @@ class FeatureDataset(Dataset):
             return torch.tensor(vec, dtype=torch.float32)
 
         def _load_npz(path: str) -> torch.Tensor:
+            """Load feature data from ``.npz`` and coerce to float tensor.
+
+            Args:
+                path: Absolute path to NumPy zipped archive.
+
+            Input:
+                ``.npz`` file containing one or more arrays.
+
+            Returns:
+                1D ``torch.float32`` feature tensor from the first stored
+                array.
+
+            Raises:
+                ValueError: If the archive contains no arrays.
+
+            Logic:
+                Read archive, select first array key, normalize shape with
+                ``_to_feature_vector``, then convert to tensor.
+            """
             npz = np.load(path)
             if isinstance(npz, np.lib.npyio.NpzFile):
                 keys = list(npz.keys())
@@ -287,17 +450,27 @@ class FeatureDataset(Dataset):
         raise FileNotFoundError(f"Feature file not found: {candidate}")
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
-        """
-        Fetches a single sample from the dataset.
+        """Fetch one sample dictionary for a given manifest row index.
 
         Args:
-            index: The index of the sample to retrieve.
+            index: Zero-based sample index.
+
+        Input:
+            Row metadata from the manifest and optional in-memory caches.
 
         Returns:
-            A dictionary containing:
-            - 'visual_features': (Optional) The visual feature tensor.
-            - 'text_features': (Optional) The text feature tensor.
-            - 'labels': The multi-label target tensor.
+            Dictionary with keys:
+            - ``visual_features`` (optional): visual tensor when configured.
+            - ``text_features`` (optional): text tensor when configured.
+            - ``labels``: multi-label ``torch.float32`` tensor.
+
+        Logic:
+            1. Retrieve row metadata for ``index``.
+            2. For each enabled modality, use cached tensor if available;
+               otherwise load from disk.
+            3. Use cached labels if preloaded; otherwise build tensor from
+               target label columns.
+            4. Return assembled sample dictionary.
         """
         # Get the metadata row for the given index
         sample_row = self.manifest.iloc[index]

@@ -20,7 +20,36 @@ def init_wandb_run(
     train_dataset_size: Optional[int],
     val_dataset_size: Optional[int],
 ) -> Optional[Tuple[Any, Any]]:
-    """Initialize a W&B run if requested by the configuration."""
+    """Initialize Weights & Biases logging from training configuration.
+
+    Args:
+        cfg: Hydra/OmegaConf configuration containing logging options under
+            ``logging.*``.
+        run_dir: Directory to use as W&B local run directory.
+        model: Model instance that may be watched for gradients/parameters.
+        train_dataset_size: Optional number of train samples for metadata.
+        val_dataset_size: Optional number of validation samples for metadata.
+
+    Input:
+        Logging configuration, runtime directory, model instance, and optional
+        dataset cardinalities.
+
+    Returns:
+        ``(wandb_module, wandb_run)`` when initialization succeeds; otherwise
+        ``None`` when W&B is disabled/unavailable or initialization fails.
+
+    Logic:
+        1. Enable only when ``logging.logger_name`` is ``wandb``.
+        2. Import ``wandb`` lazily and fail gracefully if package is missing.
+        3. Build init kwargs from config (project/entity/group/job_type/name)
+           and tags.
+        4. If run name is missing, derive it from Hydra job metadata.
+        5. Convert config to serializable payload (resolved first, fallback to
+           unresolved).
+        6. Initialize run and optionally enable model watching.
+        7. Push dataset size metadata and register metric step definitions.
+        8. Return module/run handles for subsequent logging/finalization.
+    """
 
     logger_name = OmegaConf.select(cfg, "logging.logger_name", default=None)
     if not logger_name or str(logger_name).lower() != "wandb":
@@ -130,7 +159,36 @@ def build_epoch_payload(
     epochs_no_improve: int,
     improved: bool,
 ) -> Dict[str, Any]:
-    """Flatten epoch metrics into a W&B-friendly dictionary."""
+    """Build a flattened metrics payload for one training epoch.
+
+    Args:
+        epoch: Epoch index to associate with all logged metrics.
+        train_loss: Training loss scalar for the epoch.
+        val_loss: Validation loss scalar for the epoch.
+        val_metrics: Validation metrics dictionary that may include global
+            metrics (``auprc``, ``auroc``, ``f1_macro``) and optional per-class
+            nested metrics under ``per_class``.
+        best_val_auprc: Best validation AUPRC seen so far.
+        best_val_auroc: Best validation AUROC seen so far.
+        best_val_f1_macro: Best validation macro-F1 seen so far.
+        epochs_no_improve: Count of consecutive epochs without improvement.
+        improved: Whether the primary metric improved this epoch.
+
+    Input:
+        Scalar epoch statistics plus optional nested per-class validation
+        metric dictionaries.
+
+    Returns:
+        Flat dictionary keyed with W&B-friendly names (e.g., ``train/*``,
+        ``val/*``, ``best/*``, ``training/*``).
+
+    Logic:
+        1. Seed payload with core train/validation/best/training fields.
+        2. Read optional ``per_class`` metrics.
+        3. Flatten numeric per-class values into keys of the form
+           ``val/<label>/<metric>``.
+        4. Return payload ready for ``wandb.log``.
+    """
 
     payload: Dict[str, Any] = {
         "epoch": epoch,
@@ -159,7 +217,24 @@ def build_epoch_payload(
 
 
 def log_wandb_metrics(wandb_module: Any, payload: Dict[str, Any], step: int) -> None:
-    """Safely log metrics to W&B, shielding the caller from logging errors."""
+    """Log metrics to W&B with error shielding.
+
+    Args:
+        wandb_module: Imported ``wandb`` module instance.
+        payload: Flattened metrics dictionary to log.
+        step: Step value passed to ``wandb.log``.
+
+    Input:
+        W&B module handle and a potentially empty payload.
+
+    Returns:
+        ``None``.
+
+    Logic:
+        1. Exit early when payload is empty.
+        2. Attempt ``wandb.log(payload, step=step)``.
+        3. Log warning instead of raising to avoid interrupting training.
+    """
 
     if not payload:
         return
@@ -178,7 +253,28 @@ def finalize_wandb_run(
     best_val_f1_macro: float,
     interrupted: bool,
 ) -> None:
-    """Finalize the W&B run, updating summary metrics if available."""
+    """Finalize W&B logging and persist end-of-run summary metrics.
+
+    Args:
+        wandb_module: Optional imported ``wandb`` module handle.
+        wandb_run: Optional active run object returned by ``wandb.init``.
+        best_val_auprc: Final best validation AUPRC.
+        best_val_auroc: Final best validation AUROC.
+        best_val_f1_macro: Final best validation macro-F1.
+        interrupted: Whether training terminated early/interrupted.
+
+    Input:
+        Active run handles and final summary values from training loop.
+
+    Returns:
+        ``None``.
+
+    Logic:
+        1. No-op if module/run handles are unavailable.
+        2. Best-effort update run summary with final best metrics, primary
+           metric name, and interrupted flag.
+        3. Best-effort call ``wandb.finish()`` and warn only on failure.
+    """
 
     if not wandb_module or not wandb_run:
         return

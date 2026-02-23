@@ -1,35 +1,51 @@
 # scripts/prepare_manifests.py
 
+"""Prepare multimodal training/evaluation manifests from source CSV inputs.
+
+The script merges label declarations with split membership and optional
+report text, generates relative feature paths, and writes a final manifest
+with stable column ordering.
+"""
+
 import argparse
 import logging
 import os
 
 import pandas as pd
 
-# Configure basic logging
+# Configure basic logging.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger(__name__)
 
-# --- Configuration ---
-# Column name expected in all input CSVs
+# Column name expected in all input CSVs.
 KEY_COL = "VolumeName"
-# Suffix to remove from the keys for matching
+# Suffix removed from keys for merge normalization.
 SUFFIX_TO_REMOVE = ".nii.gz"
-# --- End Configuration ---
 
 
 def generate_path(volumename: str, prefix: str, suffix: str) -> str:
+    """Generate a normalized relative feature path.
+
+    Args:
+        volumename: Volume identifier used as filename stem.
+        prefix: Relative path prefix (e.g., ``image`` or ``text``).
+        suffix: File suffix/extension.
+
+    Returns:
+        Relative feature path (e.g., ``image/train_123.pt``).
+
+    Logic:
+        Ensure ``prefix`` ends with ``/`` when non-empty and ensure
+        ``suffix`` starts with ``.`` when non-empty.
     """
-    Generates a clean, relative path.
-    e.g., ("train_123", "visual/", ".pt") -> "visual/train_123.pt"
-    """
-    # Ensure prefix ends with a slash if it's not empty
+    # Normalize prefix.
     if prefix and not prefix.endswith(("/")):
         prefix = f"{prefix}/"
-    # Ensure suffix starts with a dot
+
+    # Normalize suffix.
     if suffix and not suffix.startswith("."):
         suffix = f".{suffix}"
 
@@ -37,7 +53,14 @@ def generate_path(volumename: str, prefix: str, suffix: str) -> str:
 
 
 def normalize_key(value: str) -> str:
-    """Normalize a VolumeName by removing a known suffix when present."""
+    """Normalize a key by removing the known volume suffix when present.
+
+    Args:
+        value: Raw key value.
+
+    Returns:
+        Normalized key string or original value when not applicable.
+    """
     if not isinstance(value, str):
         return value
     if value.endswith(SUFFIX_TO_REMOVE):
@@ -46,7 +69,14 @@ def normalize_key(value: str) -> str:
 
 
 def base_key_from_full(full_key: str) -> str:
-    """Derive base key by stripping the final reconstruction segment."""
+    """Derive base exam key by stripping the final reconstruction segment.
+
+    Args:
+        full_key: Reconstruction-level key (e.g., ``train_1_a_2``).
+
+    Returns:
+        Base key (e.g., ``train_1_a``) or original value when unavailable.
+    """
     if not isinstance(full_key, str):
         return full_key
     if "_" not in full_key:
@@ -54,14 +84,22 @@ def base_key_from_full(full_key: str) -> str:
     return full_key.rsplit("_", 1)[0]
 
 
-def create_manifest(args):
+def create_manifest(args: argparse.Namespace) -> None:
+    """Create a merged manifest CSV for one split.
+
+    Args:
+        args: Parsed CLI arguments containing input paths and output schema.
+
+    Returns:
+        ``None``.
+
+    Logic:
+        Load and normalize label/split sources, optionally expand labels using
+        metadata and merge report text, generate feature-path columns, then
+        write a clean output CSV.
     """
-    Loads master labels, a single split file, and (optionally) reports.
-    Merges them, generates relative paths for visual and a single text
-    feature, and *preserves* the original report text columns.
-    """
-    
-    # --- 1. Load Master Labels (Required) ---
+
+    # 1) Load master labels.
     log.info(f"Loading master labels from: {args.labels_csv}")
     try:
         labels_df = pd.read_csv(args.labels_csv)
@@ -72,10 +110,10 @@ def create_manifest(args):
         log.error(f"Labels CSV must contain '{KEY_COL}' column.")
         raise ValueError("Invalid labels.csv format")
     
-    # Prepare labels merge key
+    # Build label merge key.
     labels_df["merge_key"] = labels_df[KEY_COL].apply(normalize_key)
 
-    # --- 1b. Optionally expand labels to all reconstructions via metadata ---
+    # 1b) Optionally expand labels to reconstruction-level keys.
     if args.metadata_csv:
         log.info(f"Loading metadata for reconstruction expansion: {args.metadata_csv}")
         try:
@@ -110,7 +148,7 @@ def create_manifest(args):
         expanded_df["merge_key"] = expanded_df["full_key"].fillna(expanded_df["merge_key"])
         labels_df = expanded_df.drop(columns=["base_key", "full_key"])
 
-    # --- 2. Load Split File (Required) ---
+    # 2) Load split file.
     log.info(f"Loading split file from: {args.split_csv}")
     try:
         split_df = pd.read_csv(args.split_csv)
@@ -121,12 +159,12 @@ def create_manifest(args):
         log.error(f"Split CSV must contain '{KEY_COL}' column.")
         raise ValueError("Invalid split.csv format")
 
-    # Prepare split merge key
+    # Build split merge key.
     split_df["merge_key"] = split_df[KEY_COL].apply(normalize_key)
-    # We only need the key from the split file for the merge
+    # Keep only unique split keys for membership filtering.
     split_keys_df = split_df[["merge_key"]].drop_duplicates()
 
-    # --- 3. Load Reports File (Optional) ---
+    # 3) Optionally load reports.
     reports_df = None
     report_text_cols = []
     if args.reports_csv:
@@ -137,10 +175,10 @@ def create_manifest(args):
                 log.error(f"Reports CSV must contain '{KEY_COL}' column.")
                 raise ValueError("Invalid reports.csv format")
             
-            # Prepare reports merge key
+            # Build reports merge key.
             reports_df["merge_key"] = reports_df[KEY_COL].apply(normalize_key)
             
-            # Identify all columns *except* the key
+            # Preserve non-key report text columns.
             report_text_cols = [col for col in reports_df.columns if col not in [KEY_COL]]
             
             reports_df = reports_df[report_text_cols].drop_duplicates(subset=["merge_key"])
@@ -153,10 +191,10 @@ def create_manifest(args):
             log.warning(f"Failed to read reports CSV: {e}. "
                         "Proceeding without report text.")
 
-    # --- 4. Merge DataFrames ---
+    # 4) Merge datasets.
     log.info("Merging labels and split file on the processed merge key")
-    
-    # Start with the inner join of labels and splits
+
+    # Start with labels restricted to split membership.
     merged_df = pd.merge(
         labels_df,
         split_keys_df,
@@ -166,7 +204,7 @@ def create_manifest(args):
 
     if reports_df is not None:
         log.info("Merging reports data...")
-        # Left join to keep all samples, even if they don't have a report
+        # Keep all samples even if report text is missing.
         merged_df = pd.merge(
             merged_df,
             reports_df,
@@ -180,46 +218,45 @@ def create_manifest(args):
 
     log.info(f"Merged manifest contains {len(merged_df)} samples.")
 
-    # --- 5. Generate Feature Path Columns ---
+    # 5) Generate feature-path columns.
     log.info("Generating feature path columns...")
-    
-    # We use the 'merge_key' (which has the suffix removed) as the volumename
+
+    # Use normalized merge key as canonical volumename.
     merged_df["volumename"] = merged_df["merge_key"]
-    
-    # Generate Visual Path
+
+    # Generate visual feature path.
     merged_df[args.visual_path_col] = merged_df["volumename"].apply(
         lambda x: generate_path(x, args.visual_prefix, args.visual_suffix if hasattr(args, 'visual_suffix') else ".pt")
     )
 
-    # Generate Text Path (if text prefix is provided)
+    # Generate text feature path when configured.
     if args.text_prefix:
         log.info(f"Generating single text path with prefix: {args.text_prefix}")
         merged_df[args.text_path_col] = merged_df["volumename"].apply(
             lambda x: generate_path(x, args.text_prefix, args.text_suffix if hasattr(args, 'text_suffix') else ".pt")
         )
 
-    # --- 6. Finalize Columns ---
-    # Drop intermediate keys and original KEY_COL
+    # 6) Finalize dataframe columns.
+    # Drop intermediate keys and original key column.
     merged_df = merged_df.drop(columns=[KEY_COL, "merge_key"])
-    
-    # --- 7. Create Output Directory (if needed) ---
+
+    # 7) Ensure output directory exists.
     output_dir = os.path.dirname(args.output_file)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         log.info(f"Ensured output directory exists: {output_dir}")
 
-    # --- 8. Save Final Manifest File ---
+    # 8) Write final manifest file.
     try:
-        # Re-order columns to be cleaner
+        # Order columns as IDs/paths, labels, then report text.
         id_cols = ["volumename", args.visual_path_col]
         if args.text_prefix:
             id_cols.append(args.text_path_col)
         
         label_cols = [col for col in labels_df.columns if col not in [KEY_COL, "merge_key"]]
         
-        # This saves: ids, paths, labels, AND original report text
         final_cols = id_cols + label_cols + report_text_cols
-        # Ensure we only try to save columns that actually exist
+        # Keep only columns that exist after merges.
         final_cols = [col for col in final_cols if col in merged_df.columns]
         
         merged_df[final_cols].to_csv(args.output_file, index=False)
@@ -232,12 +269,21 @@ def create_manifest(args):
     log.info("Manifest creation complete for this split.")
 
 
-def main():
-    """Main entry point for the script."""
+def main() -> None:
+    """CLI entrypoint for manifest preparation.
+
+    Returns:
+        ``None``.
+
+    Logic:
+        Parse CLI arguments, validate important optional combinations, and
+        execute single-split manifest creation.
+    """
     parser = argparse.ArgumentParser(
         description="Prepare a single, multimodal CT-RATE Benchmark manifest file."
     )
-    # --- Input Files ---
+
+    # 1) Input file arguments.
     parser.add_argument(
         "--labels_csv",
         type=str,
@@ -263,7 +309,7 @@ def main():
         help="(Optional) Metadata CSV with reconstruction IDs to expand labels.",
     )
     
-    # --- Output File ---
+    # 2) Output file argument.
     parser.add_argument(
         "--output_file",
         type=str,
@@ -271,7 +317,7 @@ def main():
         help="Path for the final output manifest (e.g., 'manifests/train.csv').",
     )
     
-    # --- Visual Path Generation ---
+    # 3) Visual-path generation arguments.
     parser.add_argument(
         "--visual_prefix",
         type=str,
@@ -291,7 +337,7 @@ def main():
         help="File suffix/extension to use for visual features (e.g., '.pt' or '.npz').",
     )
     
-    # --- Text Path Generation (Single) ---
+    # 4) Text-path generation arguments.
     parser.add_argument(
         "--text_prefix",
         type=str,
@@ -310,9 +356,10 @@ def main():
         default=".pt",
         help="File suffix/extension to use for text features (e.g., '.pt' or '.npz').",
     )
-    
+
+    # 5) Parse args and emit compatibility warnings.
     args = parser.parse_args()
-    
+
     if args.reports_csv is None:
         log.warning("--- No --reports_csv provided. "
                     "Manifest will be VISUAL-ONLY and will not contain report text. ---")
@@ -320,6 +367,7 @@ def main():
         log.warning("--- No --text_prefix provided. "
                     "Manifest will include report text but NO text *feature path*. ---")
 
+    # 6) Create manifest.
     create_manifest(args)
 
 

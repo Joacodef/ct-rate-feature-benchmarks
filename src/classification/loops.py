@@ -24,15 +24,24 @@ def compute_metrics(
 	label_names: Optional[List[str]] = None,
 	negative_class_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-	"""Compute aggregate and per-class metrics for multi-label logits.
+	"""Compute aggregate and optional per-class metrics from model logits.
 
 	Args:
-		preds: Raw model logits tensor (N, C).
-		targets: Ground-truth binary labels tensor (N, C).
-		label_names: Optional list of label names of length C. If provided, a
-			`per_class` mapping will be included in the returned metrics.
-		negative_class_name: Optional friendly name for the negative class when
-			computing binary metrics (defaults to "No pathology").
+		preds: Raw model logits tensor with shape ``(N, C)``.
+		targets: Ground-truth binary label tensor with shape ``(N, C)``.
+		label_names: Optional class names. When provided, per-class
+			precision/recall/F1/support are added under ``per_class``.
+		negative_class_name: Optional name used for the negative class in
+			single-label/binary output formatting.
+
+	Returns:
+		Dictionary containing macro ``auroc``, ``auprc``, ``f1_macro`` and,
+		when requested, ``per_class`` metrics.
+
+	Logic:
+		Apply sigmoid to logits, compute macro AUROC/AUPRC/F1 with safe fallbacks
+		to ``0.0`` on invalid cases, then optionally compute and name per-class
+		metrics from thresholded predictions.
 	"""
 	preds_prob = torch.sigmoid(preds).detach().cpu().numpy()
 	targets_np = targets.detach().cpu().numpy()
@@ -123,7 +132,23 @@ def train_epoch(
 	criterion: nn.Module,
 	device: torch.device,
 ) -> float:
-	"""Run one training epoch and return the mean loss."""
+	"""Run one full training epoch over a dataloader.
+
+	Args:
+		model: Trainable model that consumes visual features and outputs logits.
+		dataloader: Batch iterator yielding dictionaries with
+			``visual_features`` and ``labels`` tensors.
+		optimizer: Optimizer used for parameter updates.
+		criterion: Loss module applied to predictions and labels.
+		device: Target compute device.
+
+	Returns:
+		Mean training loss across all batches.
+
+	Logic:
+		Set model to train mode, iterate batches with gradient reset/forward/loss/
+		backward/step, accumulate batch losses, and return average loss.
+	"""
 
 	model.train()
 	total_loss = 0.0
@@ -157,7 +182,26 @@ def evaluate_epoch(
 	label_names: Optional[List[str]] = None,
 	negative_class_name: Optional[str] = None,
 ) -> Tuple[float, Dict[str, Any]]:
-	"""Evaluate a model on the provided dataloader."""
+	"""Run one evaluation epoch and compute aggregate validation metrics.
+
+	Args:
+		model: Model to evaluate.
+		dataloader: Batch iterator yielding feature/label dictionaries.
+		criterion: Loss module used to compute evaluation loss.
+		device: Target compute device.
+		label_names: Optional class names passed through to metric computation.
+		negative_class_name: Optional negative-class display name for binary
+			per-class metric naming.
+
+	Returns:
+		Tuple ``(avg_loss, metrics)`` where ``avg_loss`` is mean evaluation loss
+		and ``metrics`` is the dictionary returned by ``compute_metrics``.
+
+	Logic:
+		Run inference without gradients, accumulate losses and tensors across
+		batches, compute mean loss, then call ``compute_metrics`` on concatenated
+		predictions and targets.
+	"""
 
 	model.eval()
 	total_loss = 0.0

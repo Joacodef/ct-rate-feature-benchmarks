@@ -35,6 +35,21 @@ log = logging.getLogger(__name__)
 
 
 def _find_latest_state(cfg: DictConfig, exclude_run_dir: Optional[Path]) -> Optional[Path]:
+    """Find the newest resumable state checkpoint under the job base directory.
+
+    Args:
+        cfg: Hydra/OmegaConf config with optional ``paths.job_base_dir``.
+        exclude_run_dir: Optional run directory to skip when searching.
+
+    Returns:
+        Path to the most recent existing ``checkpoints/last_state.pt`` file, or
+        ``None`` when no candidate is found.
+
+    Logic:
+        Resolve the configured job base directory, sort run folders by mtime
+        (newest first), skip ``exclude_run_dir``, and return the first run that
+        contains ``last_state.pt``.
+    """
     job_base_dir_str = OmegaConf.select(cfg, "paths.job_base_dir", default=None)
     if not job_base_dir_str:
         return None
@@ -83,6 +98,25 @@ def _update_latest_run_pointer(
     best_val_auroc: float,
     best_val_f1_macro: float,
 ) -> None:
+    """Write/update the latest-run pointer JSON with current artifact metadata.
+
+    Args:
+        cfg: Hydra/OmegaConf config with optional ``paths.latest_run_pointer``.
+        run_dir: Directory of the active training run.
+        checkpoint_path: Optional final model checkpoint path.
+        state_path: Optional resumable state checkpoint path.
+        best_val_auprc: Best validation AUPRC.
+        best_val_auroc: Best validation AUROC.
+        best_val_f1_macro: Best validation macro F1.
+
+    Returns:
+        ``None``.
+
+    Logic:
+        If pointer path is configured, create parent directories, write a JSON
+        payload with run/checkpoint/state paths and best metrics, and log
+        warnings on failure instead of raising.
+    """
     pointer_path_str = OmegaConf.select(cfg, "paths.latest_run_pointer", default=None)
     if not pointer_path_str:
         return
@@ -112,23 +146,20 @@ def _update_latest_run_pointer(
         log.warning("Unable to update latest run pointer at %s: %s", pointer_path_str, exc)
 
 def train_model(cfg: DictConfig) -> float:
-    """
-    Main training and evaluation function.
-
-    This function orchestrates the entire pipeline:
-    1. Sets up seeding for reproducibility.
-    2. Loads and prepares datasets and dataloaders.
-    3. Initializes the model architecture.
-    4. Initializes the optimizer and loss function.
-    5. Runs the training loop with validation.
-    6. Logs metrics during training.
-    7. Saves artifacts.
+    """Run end-to-end training, validation, checkpointing, and logging.
 
     Args:
-        cfg: The Hydra configuration object.
+        cfg: Hydra/OmegaConf training configuration.
 
     Returns:
-        The primary validation metric score used for optimization.
+        Best validation AUPRC achieved during the run.
+
+    Logic:
+        Initializes reproducibility/device, builds datasets and loaders,
+        instantiates model/optimizer/loss, optionally restores resume state,
+        executes epoch loop with early stopping and metric logging, persists
+        state and final checkpoint artifacts, updates latest-run pointers, and
+        finalizes W&B logging.
     """
     log.info("Starting training pipeline...")
     # Rendering the full OmegaConf to YAML may trigger interpolations that
@@ -209,6 +240,18 @@ def train_model(cfg: DictConfig) -> float:
         os.path.join(cfg.paths.manifest_dir, cfg.data.train_manifest)
     )
     def _load_dataset(manifest_path: str) -> FeatureDataset:
+        """Load one manifest into ``FeatureDataset`` with text-column fallback.
+
+        Args:
+            manifest_path: Path to the manifest CSV to load.
+
+        Returns:
+            Initialized ``FeatureDataset``.
+
+        Logic:
+            Attempt normal load first; if manifest is missing the configured
+            text feature column, retry with text features disabled.
+        """
         try:
             return FeatureDataset(manifest_path=manifest_path, **dataset_args)
         except ValueError as exc:
@@ -632,13 +675,18 @@ def train_model(cfg: DictConfig) -> float:
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config.yaml")
 def main(cfg: DictConfig) -> None:
-    """
-    Hydra entry point.
-
-    Loads the configuration and passes it to the main training function.
+    """Hydra CLI entrypoint that validates job naming and launches training.
 
     Args:
-        cfg: The Hydra configuration object automatically populated.
+        cfg: Hydra/OmegaConf configuration populated by ``@hydra.main``.
+
+    Returns:
+        ``None``.
+
+    Logic:
+        Resolve candidate job names from environment/config/runtime, require a
+        non-empty job name for predictable artifact layout, then call
+        ``train_model`` and re-raise any failure after logging.
     """
     try:
         # Enforce that a hydra job name is provided so runs are named and

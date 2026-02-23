@@ -5,7 +5,7 @@ This package contains the core code for loading feature datasets, model definiti
 Contents
 
 - `loops.py` — reusable training and evaluation loops plus aggregate/per-class metric helpers.
-- `models/` — model architecture implementations (MLP, probes, etc.).
+- `models/` — model architecture implementations (currently `MLP`).
 - `train.py` — training orchestration (Hydra-configured entry point).
 - `evaluate.py` — checkpoint-driven evaluation entry point.
 
@@ -71,9 +71,9 @@ pytest -q
 
 Notes and recommendations
 
-- Requires Python 3.8+ and a compatible PyTorch build for your platform.
+- Requires Python 3.10+ and a compatible PyTorch build for your platform.
 - GPU support is used automatically when available.
-- The `utils/` module is a planned location for helpers (seeding, metrics helpers, logging wrappers).
+- Shared helper modules (seeding, checkpoint/eval helpers, training utilities) live under `common/`.
 - Keep `training.target_labels` and `data.columns.labels` aligned so downstream utilities (e.g., semantic retrieval metrics) see a consistent label schema.
 
 Import examples
