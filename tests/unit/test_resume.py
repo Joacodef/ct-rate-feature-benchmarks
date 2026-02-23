@@ -86,6 +86,7 @@ def test_save_training_state_writes_payload(tmp_path: Path):
         epoch=5,
         model=model,
         optimizer=optimizer,
+        best_val_auprc=0.8,
         best_val_auroc=0.9,
         epochs_no_improve=2,
         best_model_state={"weights": 1},
@@ -94,7 +95,10 @@ def test_save_training_state_writes_payload(tmp_path: Path):
     assert path.exists()
     payload = resume.torch_load_full(path)
     assert payload["epoch"] == 5
+    assert payload["best_val_auprc"] == pytest.approx(0.8)
     assert payload["best_val_auroc"] == pytest.approx(0.9)
+    assert payload["best_primary_metric"] == pytest.approx(0.8)
+    assert payload["version"] == 2
     assert "rng_state" in payload
 
 

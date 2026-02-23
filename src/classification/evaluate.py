@@ -135,13 +135,19 @@ def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
             )
         except TypeError:
             test_loss, test_metrics = evaluate_epoch(model, dataloader, criterion, device)
-        metric_key = f"test_{manifest_name}_auroc"
-        results[metric_key] = test_metrics["auroc"]
+        metric_key_auprc = f"test_{manifest_name}_auprc"
+        metric_key_auroc = f"test_{manifest_name}_auroc"
+        metric_key_f1 = f"test_{manifest_name}_f1_macro"
+        results[metric_key_auprc] = float(test_metrics.get("auprc", 0.0))
+        results[metric_key_auroc] = float(test_metrics.get("auroc", 0.0))
+        results[metric_key_f1] = float(test_metrics.get("f1_macro", 0.0))
         log.info(
-            "Test Set: %s | Loss: %.4f | AUROC: %.4f",
+            "Test Set: %s | Loss: %.4f | AUPRC: %.4f | AUROC: %.4f | F1-macro: %.4f",
             manifest_name,
             test_loss,
-            test_metrics["auroc"],
+            test_metrics.get("auprc", 0.0),
+            test_metrics.get("auroc", 0.0),
+            test_metrics.get("f1_macro", 0.0),
         )
 
         # If per-class metrics are available, write a detailed per-manifest
@@ -155,7 +161,9 @@ def evaluate_model(cfg: DictConfig) -> Dict[str, float]:
                 payload = {
                     "manifest": manifest_name,
                     "loss": float(test_loss),
+                    "auprc": float(test_metrics.get("auprc", 0.0)),
                     "auroc": float(test_metrics.get("auroc", 0.0)),
+                    "f1_macro": float(test_metrics.get("f1_macro", 0.0)),
                     "per_class": test_metrics.get("per_class"),
                 }
                 with open(report_path, "w", encoding="utf-8") as fh:

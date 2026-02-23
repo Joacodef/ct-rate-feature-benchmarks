@@ -81,7 +81,8 @@ Key behaviors (from `src/classification/train.py`):
 - Loads manifests from `paths.manifest_dir` (default: `data/manifests`) using `FeatureDataset`.
 - Resolves label count from `training.target_labels`.
 - Instantiates the model via Hydra (see `configs/model/mlp_visual.yaml`).
-- Trains with BCEWithLogitsLoss and reports AUROC (macro) on validation and test sets.
+- Trains with BCEWithLogitsLoss and optimizes validation AUPRC (macro) as the primary metric.
+- Also reports validation/test AUROC (macro), F1 (macro), and per-class precision/recall/F1/support metrics.
 - Saves a checkpoint to `paths.checkpoint_dir` (default: `outputs/${hydra.job.name}/checkpoints/final_model.pt`).
 
 ## Configuration

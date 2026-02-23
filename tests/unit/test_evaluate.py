@@ -1,5 +1,6 @@
 import json
 import os
+import pytest
 import torch
 from omegaconf import OmegaConf, DictConfig
 
@@ -53,7 +54,7 @@ def test_evaluate_model_returns_metrics(tmp_path, monkeypatch):
 
     # Monkeypatch evaluate_epoch to return deterministic metrics
     def fake_evaluate_epoch(model, dataloader, criterion, device):
-        return 0.1234, {"auroc": 0.7777}
+        return 0.1234, {"auprc": 0.6666, "auroc": 0.7777, "f1_macro": 0.5555}
 
     monkeypatch.setattr(evaluate, "evaluate_epoch", fake_evaluate_epoch)
 
@@ -83,9 +84,15 @@ def test_evaluate_model_returns_metrics(tmp_path, monkeypatch):
     results = evaluate.evaluate_model(DictConfig(cfg))
 
     assert isinstance(results, dict)
+    metric_key = f"test_test_manifest.csv_auprc"
+    assert metric_key in results
+    assert abs(results[metric_key] - 0.6666) < 1e-6
     metric_key = f"test_test_manifest.csv_auroc"
     assert metric_key in results
     assert abs(results[metric_key] - 0.7777) < 1e-6
+    metric_key = f"test_test_manifest.csv_f1_macro"
+    assert metric_key in results
+    assert abs(results[metric_key] - 0.5555) < 1e-6
 
 
 def test_evaluate_model_writes_detailed_metrics(tmp_path, monkeypatch):
@@ -108,7 +115,9 @@ def test_evaluate_model_writes_detailed_metrics(tmp_path, monkeypatch):
         captured_calls["labels"] = labels
         captured_calls["negative"] = negative_class
         return 0.4321, {
+            "auprc": 0.7777,
             "auroc": 0.8888,
+            "f1_macro": 0.6666,
             "per_class": {
                 negative_class: {"precision": 1.0, "recall": 1.0, "f1": 1.0, "support": 1},
                 labels[0]: {"precision": 0.5, "recall": 0.5, "f1": 0.5, "support": 1},
@@ -144,14 +153,21 @@ def test_evaluate_model_writes_detailed_metrics(tmp_path, monkeypatch):
     results = evaluate.evaluate_model(DictConfig(cfg))
 
     assert captured_calls == {"labels": ["Lesion"], "negative": "Healthy"}
+    metric_key = "test_eval_manifest.csv_auprc"
+    assert metric_key in results and abs(results[metric_key] - 0.7777) < 1e-6
     metric_key = "test_eval_manifest.csv_auroc"
     assert metric_key in results and abs(results[metric_key] - 0.8888) < 1e-6
+    metric_key = "test_eval_manifest.csv_f1_macro"
+    assert metric_key in results and abs(results[metric_key] - 0.6666) < 1e-6
 
     metrics_dir = detailed_root / "detailed_metrics"
     expected_report = metrics_dir / "eval_manifest.csv_detailed_metrics.json"
     assert expected_report.exists()
     payload = json.loads(expected_report.read_text())
     assert payload["manifest"] == "eval_manifest.csv"
+    assert payload["auprc"] == pytest.approx(0.7777)
+    assert payload["auroc"] == pytest.approx(0.8888)
+    assert payload["f1_macro"] == pytest.approx(0.6666)
     assert "per_class" in payload and len(payload["per_class"]) == 2
 
 

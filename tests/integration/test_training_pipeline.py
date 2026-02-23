@@ -59,3 +59,6 @@ def test_training_can_resume_from_saved_state(mock_cfg) -> None:
         resumed_state = torch.load(state_path, map_location="cpu")
     assert resumed_state.get("epoch") >= 4
     assert "optimizer" in resumed_state
+    assert "best_val_auprc" in resumed_state
+    assert "best_val_auroc" in resumed_state
+    assert "best_primary_metric" in resumed_state

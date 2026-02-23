@@ -124,7 +124,9 @@ def build_epoch_payload(
     train_loss: float,
     val_loss: float,
     val_metrics: Dict[str, Any],
+    best_val_auprc: float,
     best_val_auroc: float,
+    best_val_f1_macro: float,
     epochs_no_improve: int,
     improved: bool,
 ) -> Dict[str, Any]:
@@ -134,8 +136,12 @@ def build_epoch_payload(
         "epoch": epoch,
         "train/loss": float(train_loss),
         "val/loss": float(val_loss),
+        "val/auprc": float(val_metrics.get("auprc", 0.0)),
         "val/auroc": float(val_metrics.get("auroc", 0.0)),
+        "val/f1_macro": float(val_metrics.get("f1_macro", 0.0)),
+        "best/val_auprc": float(best_val_auprc),
         "best/val_auroc": float(best_val_auroc),
+        "best/val_f1_macro": float(best_val_f1_macro),
         "training/epochs_no_improve": int(epochs_no_improve),
         "training/best_improved": int(improved),
     }
@@ -167,7 +173,9 @@ def log_wandb_metrics(wandb_module: Any, payload: Dict[str, Any], step: int) -> 
 def finalize_wandb_run(
     wandb_module: Optional[Any],
     wandb_run: Optional[Any],
+    best_val_auprc: float,
     best_val_auroc: float,
+    best_val_f1_macro: float,
     interrupted: bool,
 ) -> None:
     """Finalize the W&B run, updating summary metrics if available."""
@@ -176,7 +184,10 @@ def finalize_wandb_run(
         return
 
     try:
+        wandb_run.summary["best_val_auprc"] = float(best_val_auprc)
         wandb_run.summary["best_val_auroc"] = float(best_val_auroc)
+        wandb_run.summary["best_val_f1_macro"] = float(best_val_f1_macro)
+        wandb_run.summary["primary_metric"] = "auprc"
         wandb_run.summary["interrupted"] = bool(interrupted)
     except Exception as exc:
         log.debug("Failed to update W&B summary: %s", exc)

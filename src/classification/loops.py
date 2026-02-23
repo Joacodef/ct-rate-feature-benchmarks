@@ -6,7 +6,12 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from sklearn.metrics import roc_auc_score, precision_recall_fscore_support
+from sklearn.metrics import (
+	average_precision_score,
+	f1_score,
+	precision_recall_fscore_support,
+	roc_auc_score,
+)
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -19,7 +24,7 @@ def compute_metrics(
 	label_names: Optional[List[str]] = None,
 	negative_class_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-	"""Compute macro AUROC and optional per-class precision/recall/f1 for multi-label logits.
+	"""Compute aggregate and per-class metrics for multi-label logits.
 
 	Args:
 		preds: Raw model logits tensor (N, C).
@@ -40,7 +45,26 @@ def compute_metrics(
 		log.warning("Could not compute AUROC (likely due to missing labels): %s", exc)
 		auroc = 0.0
 
-	out: Dict[str, Any] = {"auroc": auroc}
+	try:
+		auprc = average_precision_score(targets_np, preds_prob, average="macro")
+		if not math.isfinite(auprc):
+			raise ValueError("Non-finite AUPRC")
+	except ValueError as exc:
+		log.warning("Could not compute AUPRC (likely due to missing labels): %s", exc)
+		auprc = 0.0
+
+	try:
+		preds_bin_for_macro = (preds_prob >= 0.5).astype(int)
+		f1_macro = float(
+			f1_score(targets_np, preds_bin_for_macro, average="macro", zero_division=0)
+		)
+		if not math.isfinite(f1_macro):
+			raise ValueError("Non-finite macro F1")
+	except ValueError as exc:
+		log.warning("Could not compute macro F1: %s", exc)
+		f1_macro = 0.0
+
+	out: Dict[str, Any] = {"auroc": auroc, "auprc": auprc, "f1_macro": f1_macro}
 
 	# If the caller requested per-class metrics, compute precision/recall/f1.
 	if label_names is not None:

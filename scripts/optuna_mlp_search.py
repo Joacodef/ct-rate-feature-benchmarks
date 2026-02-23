@@ -88,12 +88,14 @@ def _resolve_outputs_root(config_name: Optional[str], overrides: List[str]) -> P
     return Path("outputs")
 
 
-def _read_best_val_auroc(outputs_root: Path, job_name: str) -> float:
+def _read_best_trial_value(outputs_root: Path, job_name: str) -> float:
     pointer_path = outputs_root / job_name / "latest_run.json"
     if not pointer_path.exists():
         return 0.0
     try:
         payload = json.loads(pointer_path.read_text())
+        if "best_val_auprc" in payload:
+            return float(payload.get("best_val_auprc", 0.0))
         return float(payload.get("best_val_auroc", 0.0))
     except Exception:
         return 0.0
@@ -154,7 +156,7 @@ def main() -> None:
         if result.returncode != 0:
             return 0.0
 
-        return _read_best_val_auroc(outputs_root, job_name)
+        return _read_best_trial_value(outputs_root, job_name)
 
     study.optimize(objective, n_trials=args.n_trials)
 

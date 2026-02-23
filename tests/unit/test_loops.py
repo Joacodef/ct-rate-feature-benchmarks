@@ -17,7 +17,9 @@ def test_compute_metrics_binary_with_label_names():
         negative_class_name="Healthy",
     )
 
+    assert "auprc" in metrics and 0.0 <= metrics["auprc"] <= 1.0
     assert "auroc" in metrics and 0.0 <= metrics["auroc"] <= 1.0
+    assert "f1_macro" in metrics and 0.0 <= metrics["f1_macro"] <= 1.0
     per_class = metrics["per_class"]
     assert set(per_class.keys()) == {"Healthy", "Lesion"}
     assert all(set(stats.keys()) == {"precision", "recall", "f1", "support"} for stats in per_class.values())
@@ -29,7 +31,9 @@ def test_compute_metrics_handles_missing_labels():
 
     metrics = loops.compute_metrics(logits, targets)
 
+    assert 0.0 <= metrics["auprc"] <= 1.0
     assert metrics["auroc"] == 0.0
+    assert metrics["f1_macro"] == 0.0
     assert "per_class" not in metrics
 
 
@@ -50,3 +54,35 @@ def test_compute_metrics_handles_per_class_error(monkeypatch):
     )
 
     assert "per_class" not in metrics
+
+
+def test_compute_metrics_handles_auprc_error(monkeypatch):
+    logits = torch.tensor([[0.0], [2.0]])
+    targets = torch.tensor([[0.0], [1.0]])
+
+    def boom(*_args, **_kwargs):
+        raise ValueError("auprc failure")
+
+    monkeypatch.setattr(loops, "average_precision_score", boom)
+
+    metrics = loops.compute_metrics(logits, targets)
+
+    assert metrics["auprc"] == 0.0
+    assert 0.0 <= metrics["auroc"] <= 1.0
+    assert 0.0 <= metrics["f1_macro"] <= 1.0
+
+
+def test_compute_metrics_handles_macro_f1_error(monkeypatch):
+    logits = torch.tensor([[0.0], [2.0]])
+    targets = torch.tensor([[0.0], [1.0]])
+
+    def boom(*_args, **_kwargs):
+        raise ValueError("f1 failure")
+
+    monkeypatch.setattr(loops, "f1_score", boom)
+
+    metrics = loops.compute_metrics(logits, targets)
+
+    assert metrics["f1_macro"] == 0.0
+    assert 0.0 <= metrics["auroc"] <= 1.0
+    assert 0.0 <= metrics["auprc"] <= 1.0

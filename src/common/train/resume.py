@@ -102,6 +102,7 @@ def save_training_state(
     epoch: int,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
+    best_val_auprc: float,
     best_val_auroc: float,
     epochs_no_improve: int,
     best_model_state: Optional[Any],
@@ -111,11 +112,13 @@ def save_training_state(
         "epoch": int(epoch),
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
+        "best_val_auprc": float(best_val_auprc),
         "best_val_auroc": float(best_val_auroc),
+        "best_primary_metric": float(best_val_auprc),
         "epochs_no_improve": int(epochs_no_improve),
         "best_model_state": best_model_state,
         "rng_state": capture_rng_state(),
-        "version": 1,
+        "version": 2,
     }
     _atomic_torch_save(payload, path)
 

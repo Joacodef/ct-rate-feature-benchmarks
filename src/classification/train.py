@@ -79,7 +79,9 @@ def _update_latest_run_pointer(
     run_dir: Path,
     checkpoint_path: Optional[Path],
     state_path: Optional[Path],
+    best_val_auprc: float,
     best_val_auroc: float,
+    best_val_f1_macro: float,
 ) -> None:
     pointer_path_str = OmegaConf.select(cfg, "paths.latest_run_pointer", default=None)
     if not pointer_path_str:
@@ -93,7 +95,15 @@ def _update_latest_run_pointer(
             "run_dir": str(run_dir.resolve()),
             "checkpoint": str(checkpoint_path.resolve()) if checkpoint_path and checkpoint_path.exists() else None,
             "state_checkpoint": str(state_path.resolve()) if state_path and state_path.exists() else None,
+            "primary_metric": "auprc",
+            "best_val_auprc": float(best_val_auprc),
             "best_val_auroc": float(best_val_auroc),
+            "best_val_f1_macro": float(best_val_f1_macro),
+            "best_val_metrics": {
+                "auprc": float(best_val_auprc),
+                "auroc": float(best_val_auroc),
+                "f1_macro": float(best_val_f1_macro),
+            },
         }
 
         pointer_path.write_text(json.dumps(payload, indent=2))
@@ -118,7 +128,7 @@ def train_model(cfg: DictConfig) -> float:
         cfg: The Hydra configuration object.
 
     Returns:
-        The primary metric score (e.g., test AUROC) for optimization.
+        The primary validation metric score used for optimization.
     """
     log.info("Starting training pipeline...")
     # Rendering the full OmegaConf to YAML may trigger interpolations that
@@ -151,7 +161,9 @@ def train_model(cfg: DictConfig) -> float:
     wandb_run: Optional[Any] = None
     interrupted = False
     start_epoch = 1
+    best_val_auprc = 0.0
     best_val_auroc = 0.0
+    best_val_f1_macro = 0.0
     epochs_no_improve = 0
     best_model_state: Optional[Any] = None
     best_metrics: Optional[Dict[str, Any]] = None
@@ -381,17 +393,24 @@ def train_model(cfg: DictConfig) -> float:
                 optimizer.load_state_dict(optimizer_state)
 
             start_epoch = int(resume_state.get("epoch", 0)) + 1
+            best_val_auprc = float(
+                resume_state.get(
+                    "best_val_auprc",
+                    resume_state.get("best_primary_metric", resume_state.get("best_val_auroc", 0.0)),
+                )
+            )
             best_val_auroc = float(resume_state.get("best_val_auroc", 0.0))
+            best_val_f1_macro = float(resume_state.get("best_val_f1_macro", 0.0))
             epochs_no_improve = int(resume_state.get("epochs_no_improve", 0))
             best_model_state = resume_state.get("best_model_state")
 
             restore_rng_state(resume_state.get("rng_state"))
 
             log.info(
-                "Resuming training from %s (next epoch=%d, best_val_auroc=%.4f)",
+                "Resuming training from %s (next epoch=%d, best_val_auprc=%.4f)",
                 resume_state_path,
                 start_epoch,
-                best_val_auroc,
+                best_val_auprc,
             )
         elif resume_enabled:
             log.info("Resume requested but no checkpoint restored; starting fresh training.")
@@ -403,6 +422,7 @@ def train_model(cfg: DictConfig) -> float:
             epoch=start_epoch - 1,
             model=model,
             optimizer=optimizer,
+            best_val_auprc=best_val_auprc,
             best_val_auroc=best_val_auroc,
             epochs_no_improve=epochs_no_improve,
             best_model_state=best_model_state,
@@ -412,7 +432,9 @@ def train_model(cfg: DictConfig) -> float:
             run_dir=run_dir,
             checkpoint_path=None,
             state_path=state_path,
+            best_val_auprc=best_val_auprc,
             best_val_auroc=best_val_auroc,
+            best_val_f1_macro=best_val_f1_macro,
         )
 
         # --- 7. Run Training Loop ---
@@ -445,21 +467,27 @@ def train_model(cfg: DictConfig) -> float:
                     label_names=list(cfg.training.target_labels),
                 )
 
+                val_auprc = float(val_metrics.get("auprc", 0.0))
                 val_auroc = float(val_metrics.get("auroc", 0.0))
+                val_f1_macro = float(val_metrics.get("f1_macro", 0.0))
 
                 log.info(
                     f"Epoch {epoch}/{cfg.training.max_epochs} | "
                     f"Train Loss: {train_loss:.4f} | "
                     f"Val Loss: {val_loss:.4f} | "
+                    f"Val AUPRC: {val_auprc:.4f} | "
                     f"Val AUROC: {val_auroc:.4f}"
+                    f" | Val F1 (macro): {val_f1_macro:.4f}"
                 )
 
-                prev_best = best_val_auroc
-                improved = val_auroc > prev_best
+                prev_best = best_val_auprc
+                improved = val_auprc > prev_best
 
                 # --- Early Stopping Check ---
                 if improved:
+                    best_val_auprc = val_auprc
                     best_val_auroc = val_auroc
+                    best_val_f1_macro = val_f1_macro
                     epochs_no_improve = 0
                     # Store the state of the best performing model
                     best_model_state = copy.deepcopy(model.state_dict())
@@ -473,11 +501,16 @@ def train_model(cfg: DictConfig) -> float:
                         best_metrics_path.write_text(json.dumps(best_metrics, indent=2))
                     except Exception as exc:
                         log.warning("Failed to write best_metrics.json: %s", exc)
-                    log.debug(f"New best val AUROC: {best_val_auroc:.4f}. Resetting patience.")
+                    log.debug(
+                        "New best val AUPRC: %.4f (AUROC: %.4f, F1-macro: %.4f). Resetting patience.",
+                        best_val_auprc,
+                        best_val_auroc,
+                        best_val_f1_macro,
+                    )
                 else:
                     epochs_no_improve += 1
                     log.debug(
-                        f"Val AUROC did not improve. Patience: {epochs_no_improve}/{patience}"
+                        f"Val AUPRC did not improve. Patience: {epochs_no_improve}/{patience}"
                     )
 
                 wandb_payload: Optional[Dict[str, Any]] = None
@@ -487,7 +520,9 @@ def train_model(cfg: DictConfig) -> float:
                         train_loss=train_loss,
                         val_loss=val_loss,
                         val_metrics=val_metrics,
+                        best_val_auprc=best_val_auprc,
                         best_val_auroc=best_val_auroc,
+                        best_val_f1_macro=best_val_f1_macro,
                         epochs_no_improve=epochs_no_improve,
                         improved=improved,
                     )
@@ -497,7 +532,9 @@ def train_model(cfg: DictConfig) -> float:
                     "train_loss": float(train_loss),
                     "val_loss": float(val_loss),
                     "val_metrics": val_metrics,
+                    "best_val_auprc": float(best_val_auprc),
                     "best_val_auroc": float(best_val_auroc),
+                    "best_val_f1_macro": float(best_val_f1_macro),
                 }
                 try:
                     with metrics_path.open("a", encoding="utf-8") as handle:
@@ -510,6 +547,7 @@ def train_model(cfg: DictConfig) -> float:
                     epoch=epoch,
                     model=model,
                     optimizer=optimizer,
+                    best_val_auprc=best_val_auprc,
                     best_val_auroc=best_val_auroc,
                     epochs_no_improve=epochs_no_improve,
                     best_model_state=best_model_state,
@@ -519,7 +557,9 @@ def train_model(cfg: DictConfig) -> float:
                     run_dir=run_dir,
                     checkpoint_path=None,
                     state_path=state_path,
+                    best_val_auprc=best_val_auprc,
                     best_val_auroc=best_val_auroc,
+                    best_val_f1_macro=best_val_f1_macro,
                 )
 
                 # Check if patience has been exceeded
@@ -527,7 +567,7 @@ def train_model(cfg: DictConfig) -> float:
                 if stop_early:
                     log.info(
                         f"Early stopping triggered after {patience} epochs "
-                        f"without improvement. Best Val AUROC: {best_val_auroc:.4f}"
+                        f"without improvement. Best Val AUPRC: {best_val_auprc:.4f}"
                     )
                     if wandb_payload is not None:
                         wandb_payload["events/early_stopping"] = 1
@@ -553,7 +593,7 @@ def train_model(cfg: DictConfig) -> float:
         if best_model_state:
             torch.save(best_model_state, checkpoint_path)
             log.info(
-                f"Best model checkpoint (Val AUROC: {best_val_auroc:.4f}) "
+                f"Best model checkpoint (Val AUPRC: {best_val_auprc:.4f}) "
                 f"saved to: {checkpoint_path}"
             )
         else:
@@ -569,16 +609,25 @@ def train_model(cfg: DictConfig) -> float:
             run_dir=run_dir,
             checkpoint_path=checkpoint_path,
             state_path=state_path,
+            best_val_auprc=best_val_auprc,
             best_val_auroc=best_val_auroc,
+            best_val_f1_macro=best_val_f1_macro,
         )
 
         if interrupted:
             raise KeyboardInterrupt
 
         # Return the best validation metric
-        return best_val_auroc
+        return best_val_auprc
     finally:
-        finalize_wandb_run(wandb_module, wandb_run, best_val_auroc, interrupted)
+        finalize_wandb_run(
+            wandb_module,
+            wandb_run,
+            best_val_auprc,
+            best_val_auroc,
+            best_val_f1_macro,
+            interrupted,
+        )
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config.yaml")

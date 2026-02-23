@@ -4,7 +4,7 @@ This package contains the core code for loading feature datasets, model definiti
 
 Contents
 
-- `loops.py` — reusable training and evaluation loops plus AUROC metric helpers.
+- `loops.py` — reusable training and evaluation loops plus aggregate/per-class metric helpers.
 - `models/` — model architecture implementations (MLP, probes, etc.).
 - `train.py` — training orchestration (Hydra-configured entry point).
 - `evaluate.py` — checkpoint-driven evaluation entry point.
@@ -45,7 +45,8 @@ What this does
 
 - Loads manifests and feature files using `common.data.dataset.FeatureDataset`.
 - Instantiates a model via Hydra configuration and adjusts output size to match the number of target labels.
-- Trains with PyTorch, computes AUROC as the primary metric, and saves a final checkpoint to the configured checkpoint directory.
+- Trains with PyTorch, uses macro AUPRC as the primary optimization metric, and saves a final checkpoint to the configured checkpoint directory.
+- Continues to report macro AUROC, macro F1, and per-class precision/recall/F1/support during training and evaluation.
 - Persists a `last_state.pt` training snapshot each epoch so interrupted runs can resume where they left off.
 
 If the active config declares a `text_feature` column but the manifest omits it, `FeatureDataset` is reloaded without text features and training continues in visual-only mode. This lets you keep multimodal configs on disk without breaking simple manifests.

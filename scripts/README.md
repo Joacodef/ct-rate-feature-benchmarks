@@ -35,3 +35,30 @@ python .\scripts\prepare_manifests.py --input-root data/features --output-dir da
 ```
 
 > Adjust arguments to match your storage layout; the script does not modify configuration files automatically.
+
+## optuna_mlp_search.py
+
+Runs Optuna hyperparameter search by launching repeated training jobs through the classification entry point.
+
+- Samples MLP depth/hidden dimensions plus learning-rate, dropout, and weight decay.
+- Uses each trial's latest_run.json to score the objective.
+- Reads best_val_auprc as the primary trial objective and falls back to best_val_auroc for older runs.
+
+Example:
+
+```powershell
+python .\scripts\optuna_mlp_search.py --study-name mlp_hidden_dims --n-trials 20
+```
+
+## optuna_best_summary.py
+
+Summarizes the best trial from an Optuna outputs directory.
+
+- Selects the best trial by AUPRC when available (fallback AUROC for older trial folders).
+- Prints best AUPRC, AUROC, and F1-macro (if present) plus key hyperparameters from the trial config.
+
+Example:
+
+```powershell
+python .\scripts\optuna_best_summary.py outputs/optuna_manual_labels_trials
+```
