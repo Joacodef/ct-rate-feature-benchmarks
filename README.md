@@ -31,7 +31,6 @@ ct-rate-feature-benchmarks/
 │  │  ├─ train.py          # Hydra-configured classification entry point
 │  │  └─ evaluate.py       # Checkpoint evaluation entry point
 │  ├─ common/              # Shared data loaders, seeding, checkpoint helpers
-│  └─ retrieval/           # Retrieval-specific code (WIP)
 ├─ tests/
 │  ├─ integration/
 │  │  └─ test_training_pipeline.py
@@ -40,7 +39,9 @@ ct-rate-feature-benchmarks/
 │     ├─ test_evaluate.py
 │     ├─ test_feature_dataset.py
 │     ├─ test_loops.py
-│     └─ test_resume.py
+│     ├─ test_optuna_scripts.py
+│     ├─ test_resume.py
+│     └─ test_wandb_logging.py
 ├─ pyproject.toml
 └─ README.md
 ```
@@ -65,7 +66,7 @@ python -m classification.train
 Override configuration values on the command line as needed, for example to change the batch size, epochs, or point to your features root:
 
 ```powershell
-python -m classification.train training.batch_size=64 training.max_epochs=10 paths.data_root="E:/ct-rate-feature-benchmarks/data/features"
+python -m classification.train training.batch_size=64 training.max_epochs=10 paths.data_root="data/features/CT-CLIP_v2"
 ```
 
 Resume an interrupted run by enabling the resume flag or pointing directly to a saved training snapshot:
@@ -90,7 +91,7 @@ Key behaviors (from `src/classification/train.py`):
 Top-level config: `configs/config.yaml`.
 
 - paths
-  - `data_root`: root folder containing feature subfolders such as `features/image/` and `features/text/`.
+  - `data_root`: root folder used to resolve relative feature paths from manifests (default: `data/features/CT-CLIP_v2`).
   - `manifest_dir`: directory holding split manifests (e.g., `data/manifests`).
   - `output_dir`, `checkpoint_dir`: output and checkpoint locations.
 - data
@@ -111,7 +112,7 @@ Data manifest expectations (see `configs/data/default_features.yaml`):
 
 ## Data layout
 
-Place your precomputed features under `paths.data_root`. A common layout is:
+Place your precomputed features under `paths.data_root` (default: `data/features/CT-CLIP_v2`). The manifest columns should contain paths relative to this root. A common layout is:
 
 ```
 <paths.data_root>/
@@ -146,6 +147,6 @@ pytest -q
 
 ## Notes
 
-- Python 3.8+ is recommended.
+- Python 3.10+ is required.
 - CUDA is used automatically when available.
 - For guidance on the package internals, see `src/classification/README.md`.
