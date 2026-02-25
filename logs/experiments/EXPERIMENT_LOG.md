@@ -12,6 +12,8 @@ Manual registry of experiment actions and decisions.
 
 ### [YYYY-MM-DD HH:MM] <short-title>
 - **Status:** planned | running | completed | failed
+- **Plan phase:** Phase 0 | Phase 1 | Phase 2 | Phase 3
+- **Plan item:** integer checklist item within phase (e.g., 1, 2, 3)
 - **Stage:** baseline | optuna | budget-splits | training | evaluation | analysis
 - **Source:** GPT labels | Manual labels
 - **Command:**
@@ -27,22 +29,29 @@ Manual registry of experiment actions and decisions.
 
 ---
 
-## Step Map (Bottleneck Investigation Plan)
+## Plan Tracking Map (Canonical names from Bottleneck Investigation Plan)
 
-- **Step 1 — Phase 0: Reproducible baseline + HPO setup**
+- **Phase 0 — Hyperparameter Optimization and Protocol Selection**
   - Goal: establish stable GPT/manual training protocol and select frozen hyperparameters.
-- **Step 2 — Phase 2 prep: Label-budget split generation**
-  - Goal: build matched train-budget manifests with fixed validation.
-- **Step 3 — Phase 2 execution: Budget training runs**
-  - Goal: train all `(budget, seed)` jobs with frozen hyperparameters.
-- **Step 4 — Phase 2/3: Evaluation, crossover, robustness**
-  - Goal: threshold-tuned eval, uncertainty, crossover estimates, and sensitivity checks.
+  - Status: completed (Optuna completed for both sources).
+- **Phase 1 — Model-Side Bottleneck Checks**
+  - Item 1: Threshold/metric checks (per-label threshold tuning, F1 recomputation).
+  - Note: Label quality and distribution checks are performed in the data/label-generation repo, not here.
+  - Status: not started.
+- **Phase 2 — Scaling Law Study (Core Objective)**
+  - Item 1: Label-budget ladder.
+  - Item 2: Fit scaling trends.
+  - Item 3: Crossover analysis.
+  - Status: item 1 completed; items 2-3 pending final analysis outputs.
+- **Phase 3 — Robustness and Sensitivity**
+  - Goal: alternate split seed and stronger-backbone sensitivity checks.
+  - Status: not started.
 
 ---
 
 ## Recorded Actions
 
-## Step 1 — Phase 0: Reproducible baseline + HPO setup
+## Phase 0 — Hyperparameter Optimization and Protocol Selection
 
 ### [2026-02-25] Optuna search (GPT labels) - run 1
 - **Status:** completed
@@ -163,7 +172,39 @@ Manual registry of experiment actions and decisions.
   - Balanced candidate frozen manual hyperparameters for scaling study: from `_1` (`hidden_dims=[4096,64]`, `learning_rate=7.96315959107497e-05`, `weight_decay=1.5712861337496863e-05`, `dropout=0.048751226478266366`, `batch_size=64`).
   - Alternative strict-stability candidate: from `_3` (`hidden_dims=[512,128]`, `learning_rate=5.462038715569678e-05`, `weight_decay=0.0006147167109835951`, `dropout=0.28605355806129484`, `batch_size=64`).
 
-## Step 2 — Phase 2 prep: Label-budget split generation
+### [2026-02-25] Phase 1 Item 1: Representation checks (HPO MLP size)
+- **Status:** completed
+- **Plan phase:** Phase 1
+- **Plan item:** 1
+- **Stage:** analysis
+- **Source:** GPT labels, Manual labels
+- **Command:**
+  HPO runs with Optuna, searching over MLP depth (up to 5 layers) and hidden sizes.
+- **Config:** configs/optuna_gpt_labels_config.yaml, configs/optuna_manual_labels_config.yaml
+- **Inputs:** data/manifests/gpt/budget_splits, data/manifests/manual/budget_splits
+- **Outputs:** outputs/optuna_gpt_labels_studies/*, outputs/optuna_manual_labels_studies/*
+- **Reason:** Test if larger MLP heads improve performance, to check for feature bottleneck.
+- **Result summary:** Larger MLPs (3–5 layers, bigger hidden sizes) did not outperform 2-layer MLPs; HPO consistently selected smaller heads as optimal.
+- **Conclusion:** No significant gain from increasing MLP size—representation bottleneck is likely, not classifier capacity.
+### [2026-02-25] Phase 0: Representation check (HPO MLP size)
+- **Status:** completed
+- **Plan phase:** Phase 0
+- **Plan item:** (embedded)
+- **Stage:** analysis
+- **Source:** GPT labels, Manual labels
+- **Command:**
+  HPO runs with Optuna, searching over MLP depth (up to 5 layers) and hidden sizes.
+- **Config:** configs/optuna_gpt_labels_config.yaml, configs/optuna_manual_labels_config.yaml
+- **Inputs:** data/manifests/gpt/budget_splits, data/manifests/manual/budget_splits
+- **Outputs:** outputs/optuna_gpt_labels_studies/*, outputs/optuna_manual_labels_studies/*
+- **Reason:** Test if larger MLP heads improve performance, to check for feature bottleneck (representation check is part of HPO).
+- **Result summary:** Larger MLPs (3–5 layers, bigger hidden sizes) did not outperform 2-layer MLPs; HPO consistently selected smaller heads as optimal.
+- **Conclusion:** No significant gain from increasing MLP size—representation bottleneck is likely, not classifier capacity.
+
+
+## Phase 2 — Scaling Law Study (Core Objective)
+
+### Phase 2 - Item 1: Label-budget ladder
 
 ### [2026-02-25] Budget manifests generation (GPT labels)
 - **Status:** completed
@@ -191,7 +232,7 @@ Manual registry of experiment actions and decisions.
 - **Reason:** Create scaling-law train subsets for manual labels with fixed validation.
 - **Notes:** Stratified sampling default enabled in script.
 
-## Step 3 — Phase 2 execution: Budget training runs
+### Phase 2 - Item 1: Label-budget ladder (training execution)
 
 ### [2026-02-25] Budget training sweep completed (GPT labels)
 - **Status:** completed
@@ -221,7 +262,7 @@ Manual registry of experiment actions and decisions.
 - **Reason:** Run full manual-label scaling-law training sweep across all generated budgets and seeds.
 - **Result summary:** Completed all manual budget split training runs.
 
-## Step 4 — Phase 2/3: Evaluation, crossover, robustness
+### Phase 2 - Item 2: Fit scaling trends (evaluation + aggregation artifacts)
 
 ### [2026-02-25] Evaluation + aggregation completed (GPT labels)
 - **Status:** completed
@@ -246,3 +287,4 @@ Manual registry of experiment actions and decisions.
 - **Outputs:** outputs/aggregated_results/manual_labels_per_run.csv, outputs/aggregated_results/manual_labels_by_budget.csv
 - **Reason:** Evaluate all manual budget runs on test manifests and aggregate by budget across seeds.
 - **Result summary:** Aggregation command executed for manual runs.
+

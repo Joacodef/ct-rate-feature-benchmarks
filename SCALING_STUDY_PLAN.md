@@ -1,4 +1,5 @@
-# Bottleneck Source Investigation Plan
+
+# CT-Rate Label Source Scaling Study Plan
 
 ## 1) Main Objective (Anchor)
 
@@ -77,55 +78,39 @@ Signals:
 
 ---
 
+
 ## 5) Phase Plan
 
-## Phase 0 — Reproducible Baseline
+## Phase 0 — Hyperparameter Optimization and Protocol Selection
+
+Goal:
+- Select stable, high-performing hyperparameters for both label sources using HPO.
+- Representation bottleneck check is embedded in HPO: if larger MLPs do not outperform, feature bottleneck is likely.
 
 Deliverables:
-- Frozen-feature MLP baseline for GPT labels.
-- Frozen-feature MLP baseline for expert labels.
-- Common metrics table: macro/micro AUPRC, AUROC, F1.
+- Frozen protocol for scaling law study (selected hyperparameters, architecture, and evaluation protocol).
 
 Acceptance:
-- Runs are reproducible across 3+ seeds.
-- No config/path inconsistencies.
+- HPO runs completed for both GPT and manual labels.
+- Protocol is fixed for downstream scaling experiments.
 
-## Phase 1 — Bottleneck Localization
+## Phase 1 — Model-Side Bottleneck Checks
 
-### 1.1 Representation checks
-- Compare baseline MLP vs larger MLP on same frozen features.
-- Optional: partial unfreezing/adapter test (single controlled variant).
-
-Interpretation:
-- If all frozen-head variants plateau similarly, feature bottleneck likely dominant.
-
-### 1.2 Label-quality checks
-- GPT vs expert agreement on overlapping subset.
-- Per-label error analysis (false positives/false negatives by class).
-- Small manual audit of disagreement cases.
-
-Interpretation:
-- If disagreement clusters in low-performing labels, label quality contributes strongly.
-
-### 1.3 Distribution checks
-- Compare prevalence per label across train/val/test and GPT/expert sets.
-- Evaluate by subgroup (if metadata available).
-
-Interpretation:
-- Large shifts indicate split/domain bottleneck.
-
-### 1.4 Threshold/metric checks
+### Item 1 — Threshold/metric checks
 - Tune per-label thresholds for F1 on validation.
 - Recompute test F1 using frozen thresholds.
 
 Interpretation:
 - Large F1 jump with little AUPRC change => operating-point bottleneck.
 
+### Note on Label Quality and Distribution Checks
+- Label quality (agreement, error analysis, manual audit) and distribution checks (prevalence, subgroup analysis) are performed in the data/label-generation repository, not here. Summaries or references to those analyses may be included as needed.
+
 ## Phase 2 — Scaling Law Study (Core Objective)
 
 Construct learning curves for GPT-label and expert-label training separately.
 
-### 2.1 Label-budget ladder
+### Item 1 — Label-budget ladder
 Use matched training budgets (example):
 - 100, 250, 500, 1k, 2k, 5k, 10k, full
 
@@ -134,12 +119,12 @@ For each budget:
 - Train with multiple seeds.
 - Evaluate on the same held-out expert-annotated test set (or fixed gold set).
 
-### 2.2 Fit scaling trends
+### Item 2 — Fit scaling trends
 For each source (GPT, expert):
 - Fit performance vs label count curve (log-scale x-axis).
 - Estimate sample efficiency and asymptotic ceiling.
 
-### 2.3 Crossover analysis
+### Item 3 — Crossover analysis
 Compute:
 - N_expert_to_beat_GPT_full
 - N_GPT_to_beat_expert_full
@@ -177,8 +162,8 @@ Action:
 2. Threshold-tuned F1 evaluation (per-label thresholds).
 3. Label-budget curves at 5 budget points per source.
 4. One representation stress test (e.g., linear probe or partial unfreeze).
-4. One representation stress test (e.g., larger MLP or partial unfreeze).
-5. Crossover estimate + uncertainty.
+5. One representation stress test (e.g., larger MLP or partial unfreeze).
+6. Crossover estimate + uncertainty.
 
 This MVP is sufficient to answer the main question with defensible evidence.
 
