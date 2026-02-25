@@ -105,6 +105,14 @@ training:
 utils:
   seed: 42
 
+# Optuna search configuration
+optuna:
+  seed: 42
+  disable_pruning: false
+  pruner_startup_trials: 10
+  pruner_warmup_steps: 5
+  pruner_interval_steps: 1
+
 # Analysis configuration (for analyze_alignment.py script)
 analysis:
   filter_normal_cases: false  # Set to true to exclude cases with all labels = 0

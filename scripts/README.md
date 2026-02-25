@@ -67,6 +67,10 @@ Runs Optuna hyperparameter search by launching repeated training jobs through th
 * Samples MLP depth/hidden dimensions plus learning-rate, dropout, and weight decay.
 * Uses each trial's latest_run.json to score the objective.
 * Reads best_val_auprc as the primary trial objective and falls back to best_val_auroc for older runs.
+* Writes trial folders under a study subdirectory: `<outputs_root>/<study_name>/<job_prefix>_tXXXX`.
+* Enables Optuna MedianPruner by default using per-epoch metrics from each trial's `metrics.jsonl`.
+* Disable pruning with `--disable-pruning` or tune via `--pruner-startup-trials`, `--pruner-warmup-steps`, and `--pruner-interval-steps`.
+* The same pruning knobs can be set in config under `optuna.disable_pruning`, `optuna.pruner_startup_trials`, `optuna.pruner_warmup_steps`, and `optuna.pruner_interval_steps`.
 
 Example:
 
@@ -85,6 +89,6 @@ Summarizes the best trial from an Optuna outputs directory.
 Example:
 
 ```powershell
-python .\scripts\optuna_best_summary.py outputs/optuna_manual_labels_trials
+python .\scripts\optuna_best_summary.py outputs/optuna_manual_labels_trials/mlp_hidden_dims
 
 ```

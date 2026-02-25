@@ -167,13 +167,17 @@ def train_model(cfg: DictConfig) -> float:
     # not run inside the Hydra application context so those interpolations can
     # raise. Attempt a safe render and fall back to a non-resolving str() if it
     # fails.
-    try:
-        cfg_repr = OmegaConf.to_yaml(cfg)
-    except Exception as exc:
-        log.warning("Could not render full config to YAML (skipping detailed dump): %s", exc)
-        # str(cfg) is safe and will not attempt to resolve interpolations
-        cfg_repr = str(cfg)
-    log.info(f"Full configuration:\n{cfg_repr}")
+    is_optuna_run = os.environ.get("CT_RATE_OPTUNA_RUN") == "1"
+    if is_optuna_run:
+        log.info("Full configuration dump skipped for Optuna trial run.")
+    else:
+        try:
+            cfg_repr = OmegaConf.to_yaml(cfg)
+        except Exception as exc:
+            log.warning("Could not render full config to YAML (skipping detailed dump): %s", exc)
+            # str(cfg) is safe and will not attempt to resolve interpolations
+            cfg_repr = str(cfg)
+        log.info(f"Full configuration:\n{cfg_repr}")
 
     # --- 1. Set Up Reproducibility & Device ---
     set_seed(cfg.utils.seed)
