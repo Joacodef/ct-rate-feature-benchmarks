@@ -195,16 +195,17 @@ def summarize(study_dir: str, top_k: int = 10, rel_band: float = 0.01) -> None:
 
     stability = summarize_stability(ranked, top_k=top_k, rel_band=rel_band)
 
-    # 4) Print summary output.
-    print(f"Study: {os.path.basename(study_dir)}")
-    print(f" Best trial: {best[0]}")
+    # 4) Collect summary output in a buffer.
+    lines = []
+    lines.append(f"Study: {os.path.basename(study_dir)}")
+    lines.append(f" Best trial: {best[0]}")
     best_metrics = best[1] or {}
     if best_metrics.get("auprc") is not None:
-        print(f" Best val AUPRC: {float(best_metrics['auprc']):.6f}")
+        lines.append(f" Best val AUPRC: {float(best_metrics['auprc']):.6f}")
     if best_metrics.get("auroc") is not None:
-        print(f" Best val AUROC: {float(best_metrics['auroc']):.6f}")
+        lines.append(f" Best val AUROC: {float(best_metrics['auroc']):.6f}")
     if best_metrics.get("f1_macro") is not None:
-        print(f" Best val F1-macro: {float(best_metrics['f1_macro']):.6f}")
+        lines.append(f" Best val F1-macro: {float(best_metrics['f1_macro']):.6f}")
     cfg = best[2]
 
     # Read a small set of likely hyperparameters.
@@ -213,44 +214,57 @@ def summarize(study_dir: str, top_k: int = 10, rel_band: float = 0.01) -> None:
     dropout = get_path(cfg, "model", "params", "dropout")
     hidden = get_path(cfg, "model", "params", "hidden_dims")
     bs = get_path(cfg, "training", "batch_size")
-    print(" Hyperparameters:")
+    lines.append(" Hyperparameters:")
     if lr is not None:
-        print(f"  - learning_rate: {lr}")
+        lines.append(f"  - learning_rate: {lr}")
     if wd is not None:
-        print(f"  - weight_decay: {wd}")
+        lines.append(f"  - weight_decay: {wd}")
     if dropout is not None:
-        print(f"  - dropout: {dropout}")
+        lines.append(f"  - dropout: {dropout}")
     if hidden is not None:
-        print(f"  - hidden_dims: {hidden}")
+        lines.append(f"  - hidden_dims: {hidden}")
     if bs is not None:
-        print(f"  - batch_size: {bs}")
+        lines.append(f"  - batch_size: {bs}")
 
     if stability:
-        print(" Stability (objective across trials):")
-        print(
+        lines.append(" Stability (objective across trials):")
+        lines.append(
             f"  - usable_trials: {stability['n']} | mean={stability['mean']:.6f} "
             f"median={stability['median']:.6f} std={stability['std']:.6f}"
         )
-        print(
+        lines.append(
             f"  - top_{stability['top_k']}: mean={stability['top_k_mean']:.6f} "
             f"median={stability['top_k_median']:.6f} std={stability['top_k_std']:.6f} "
             f"min={stability['top_k_min']:.6f} max={stability['top_k_max']:.6f}"
         )
-        print(
+        lines.append(
             f"  - peak_gap(best-top_{stability['top_k']}_median): "
             f"{stability['best_minus_top_k_median']:.6f}"
         )
-        print(
+        lines.append(
             f"  - near_best_band: >= {stability['elite_threshold']:.6f} "
             f"({stability['elite_count']} trials)"
         )
         if stability["elite_hidden_mode"] is not None:
             mode_val, mode_count = stability["elite_hidden_mode"]
-            print(f"  - near_best hidden_dims mode: {mode_val} ({mode_count} trials)")
+            lines.append(f"  - near_best hidden_dims mode: {mode_val} ({mode_count} trials)")
         if stability["elite_dropout_mode"] is not None:
             mode_val, mode_count = stability["elite_dropout_mode"]
-            print(f"  - near_best dropout mode: {mode_val} ({mode_count} trials)")
-    print("")
+            lines.append(f"  - near_best dropout mode: {mode_val} ({mode_count} trials)")
+    lines.append("")
+
+    # Print to terminal
+    for l in lines:
+        print(l)
+
+    # Write to file in study_dir
+    out_path = os.path.join(study_dir, "optuna_best_summary.md")
+    try:
+        with open(out_path, "w", encoding="utf-8") as f:
+            for l in lines:
+                f.write(l + "\n")
+    except Exception as e:
+        print(f"[WARN] Could not write summary file: {e}")
 
 
 def main() -> None:

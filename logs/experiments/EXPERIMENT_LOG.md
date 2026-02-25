@@ -140,13 +140,13 @@ Manual registry of experiment actions and decisions.
   - outputs/optuna_gpt_labels_studies/gpt_mlp_search_2
   - outputs/optuna_gpt_labels_studies/gpt_mlp_search_3
 - **Result summary:**
-  - `gpt_mlp_search`: best AUPRC `0.544412`, top_10 std `0.000053`, all-trial std `0.010757`
-  - `gpt_mlp_search_2`: best AUPRC `0.545538`, top_10 std `0.000072`, all-trial std `0.009402`
-  - `gpt_mlp_search_3`: best AUPRC `0.544929`, top_10 std `0.000026`, all-trial std `0.006701`
+  - `gpt_mlp_search`: best AUPRC `0.544412`, top_10 std `0.000053`, all-trial std `0.010757` (trial 114)
+  - `gpt_mlp_search_2`: best AUPRC `0.545538`, top_10 std `0.000072`, all-trial std `0.009402` (trial 92)
+  - `gpt_mlp_search_3`: best AUPRC `0.544929`, top_10 std `0.000026`, all-trial std `0.006701` (trial 114)
 - **Notes:**
   - Stability favors `gpt_mlp_search_3` (lowest global std, lowest top-k std, smallest peak gap).
   - Peak AUPRC is highest in `gpt_mlp_search_2`, but gain vs `_3` is small (`+0.000609`).
-  - Candidate frozen GPT hyperparameters for scaling study: `hidden_dims=[4096,4096]`, `learning_rate=1.078345968032944e-05`, `weight_decay=1.4532294467319546e-05`, `dropout=0.2903271520872891`, `batch_size=64`.
+  - Candidate frozen GPT hyperparameters for scaling study, from `_3`: `hidden_dims=[4096,4096]`, `learning_rate=1.078345968032944e-05`, `weight_decay=1.4532294467319546e-05`, `dropout=0.2903271520872891`, `batch_size=64`.
 
 ### [2026-02-25] Optuna best summary (Manual studies)
 - **Status:** completed
@@ -163,14 +163,13 @@ Manual registry of experiment actions and decisions.
   - outputs/optuna_manual_labels_studies/manual_mlp_search_2
   - outputs/optuna_manual_labels_studies/manual_mlp_search_3
 - **Result summary:**
-  - `manual_mlp_search`: best AUPRC `0.649525`, top_10 std `0.001991`, all-trial std `0.033037`, best F1 `0.321510`
-  - `manual_mlp_search_2`: best AUPRC `0.652822`, top_10 std `0.001607`, all-trial std `0.036559`, best F1 `0.094118`
-  - `manual_mlp_search_3`: best AUPRC `0.646614`, top_10 std `0.000529`, all-trial std `0.034094`, best F1 `0.222898`
+  - `manual_mlp_search`: best AUPRC `0.649525`, top_10 std `0.001991`, all-trial std `0.033037`, best F1 `0.321510` (trial 117)
+  - `manual_mlp_search_2`: best AUPRC `0.652822`, top_10 std `0.001607`, all-trial std `0.036559`, best F1 `0.094118` (trial 116)
+  - `manual_mlp_search_3`: best AUPRC `0.646614`, top_10 std `0.000529`, all-trial std `0.034094`, best F1 `0.222898` (trial 73)
 - **Notes:**
   - Peak AUPRC is highest in `_2`, but with very low best F1-macro in this summary.
   - Stability concentration is strongest in `_3` (lowest top-k std, smallest peak gap, largest near-best set).
-  - Balanced candidate frozen manual hyperparameters for scaling study: from `_1` (`hidden_dims=[4096,64]`, `learning_rate=7.96315959107497e-05`, `weight_decay=1.5712861337496863e-05`, `dropout=0.048751226478266366`, `batch_size=64`).
-  - Alternative strict-stability candidate: from `_3` (`hidden_dims=[512,128]`, `learning_rate=5.462038715569678e-05`, `weight_decay=0.0006147167109835951`, `dropout=0.28605355806129484`, `batch_size=64`).
+  - Balanced candidate frozen manual hyperparameters for scaling study: from `_1`,  (`hidden_dims=[4096,64]`, `learning_rate=7.96315959107497e-05`, `weight_decay=1.5712861337496863e-05`, `dropout=0.048751226478266366`, `batch_size=64`).
 
 ### [2026-02-25] Phase 1 Item 1: Representation checks (HPO MLP size)
 - **Status:** completed

@@ -292,6 +292,11 @@ def _configure_eval_cfg(
     if test_manifests is not None:
         OmegaConf.update(cfg, "data.test_manifests", test_manifests, force_add=True)
 
+    # Ensure only the specified target_labels are used for evaluation
+    # This will be picked up by the evaluation script
+    if "training" in cfg and "target_labels" in cfg["training"]:
+        OmegaConf.update(cfg, "data.columns.labels", cfg["training"]["target_labels"], force_add=True)
+
     return cfg
 
 
