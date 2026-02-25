@@ -93,7 +93,7 @@ Acceptance:
 ## Phase 1 — Bottleneck Localization
 
 ### 1.1 Representation checks
-- Linear probe vs MLP vs larger MLP on same frozen features.
+- Compare baseline MLP vs larger MLP on same frozen features.
 - Optional: partial unfreezing/adapter test (single controlled variant).
 
 Interpretation:
@@ -177,6 +177,7 @@ Action:
 2. Threshold-tuned F1 evaluation (per-label thresholds).
 3. Label-budget curves at 5 budget points per source.
 4. One representation stress test (e.g., linear probe or partial unfreeze).
+4. One representation stress test (e.g., larger MLP or partial unfreeze).
 5. Crossover estimate + uncertainty.
 
 This MVP is sufficient to answer the main question with defensible evidence.

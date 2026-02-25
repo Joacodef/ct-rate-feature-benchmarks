@@ -5,11 +5,14 @@ selects the best trial by AUPRC (fallback AUROC), and prints a concise
 summary with key hyperparameters.
 """
 
+import argparse
 import json
 import os
 import re
 import sys
-from typing import Any, Dict, Optional, Tuple
+from collections import Counter
+from statistics import mean, median, pstdev
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def read_latest_metrics(trial_dir: str) -> Optional[Dict[str, Any]]:
@@ -100,7 +103,7 @@ def read_config_yaml(trial_dir: str) -> Dict[str, Any]:
         return params
 
 
-def summarize(study_dir: str) -> None:
+def summarize(study_dir: str, top_k: int = 10, rel_band: float = 0.01) -> None:
     """Print a summary for the best trial in a study directory.
 
     Args:
@@ -139,7 +142,58 @@ def summarize(study_dir: str) -> None:
             value = metrics.get("auroc")
         return float(value) if value is not None else float("-inf")
 
-    best = max(results, key=metric_value)
+    ranked = sorted(results, key=metric_value, reverse=True)
+    best = ranked[0]
+
+    def get_path(d: Dict[str, Any], *keys: str) -> Any:
+        for k in keys:
+            if not isinstance(d, dict) or k not in d:
+                return None
+            d = d[k]
+        return d
+
+    def summarize_stability(
+        ranked_trials: List[Tuple[str, Dict[str, Any], Dict[str, Any]]],
+        top_k: int,
+        rel_band: float,
+    ) -> Dict[str, Any]:
+        values = [metric_value(item) for item in ranked_trials]
+        values = [v for v in values if v != float("-inf")]
+        if not values:
+            return {}
+
+        k = min(top_k, len(values))
+        top_values = values[:k]
+        best_value = values[0]
+        threshold = best_value * (1.0 - rel_band)
+        elite = [item for item in ranked_trials if metric_value(item) >= threshold]
+
+        hidden_counter = Counter(
+            str(get_path(item[2], "model", "params", "hidden_dims")) for item in elite
+        )
+        dropout_counter = Counter(
+            str(get_path(item[2], "model", "params", "dropout")) for item in elite
+        )
+
+        return {
+            "n": len(values),
+            "mean": mean(values),
+            "median": median(values),
+            "std": pstdev(values) if len(values) > 1 else 0.0,
+            "top_k": k,
+            "top_k_mean": mean(top_values),
+            "top_k_median": median(top_values),
+            "top_k_std": pstdev(top_values) if len(top_values) > 1 else 0.0,
+            "top_k_min": min(top_values),
+            "top_k_max": max(top_values),
+            "best_minus_top_k_median": best_value - median(top_values),
+            "elite_threshold": threshold,
+            "elite_count": len(elite),
+            "elite_hidden_mode": hidden_counter.most_common(1)[0] if hidden_counter else None,
+            "elite_dropout_mode": dropout_counter.most_common(1)[0] if dropout_counter else None,
+        }
+
+    stability = summarize_stability(ranked, top_k=top_k, rel_band=rel_band)
 
     # 4) Print summary output.
     print(f"Study: {os.path.basename(study_dir)}")
@@ -154,13 +208,6 @@ def summarize(study_dir: str) -> None:
     cfg = best[2]
 
     # Read a small set of likely hyperparameters.
-    def get_path(d: Dict[str, Any], *keys: str) -> Any:
-        for k in keys:
-            if not isinstance(d, dict) or k not in d:
-                return None
-            d = d[k]
-        return d
-
     lr = get_path(cfg, "training", "learning_rate")
     wd = get_path(cfg, "training", "weight_decay")
     dropout = get_path(cfg, "model", "params", "dropout")
@@ -177,6 +224,32 @@ def summarize(study_dir: str) -> None:
         print(f"  - hidden_dims: {hidden}")
     if bs is not None:
         print(f"  - batch_size: {bs}")
+
+    if stability:
+        print(" Stability (objective across trials):")
+        print(
+            f"  - usable_trials: {stability['n']} | mean={stability['mean']:.6f} "
+            f"median={stability['median']:.6f} std={stability['std']:.6f}"
+        )
+        print(
+            f"  - top_{stability['top_k']}: mean={stability['top_k_mean']:.6f} "
+            f"median={stability['top_k_median']:.6f} std={stability['top_k_std']:.6f} "
+            f"min={stability['top_k_min']:.6f} max={stability['top_k_max']:.6f}"
+        )
+        print(
+            f"  - peak_gap(best-top_{stability['top_k']}_median): "
+            f"{stability['best_minus_top_k_median']:.6f}"
+        )
+        print(
+            f"  - near_best_band: >= {stability['elite_threshold']:.6f} "
+            f"({stability['elite_count']} trials)"
+        )
+        if stability["elite_hidden_mode"] is not None:
+            mode_val, mode_count = stability["elite_hidden_mode"]
+            print(f"  - near_best hidden_dims mode: {mode_val} ({mode_count} trials)")
+        if stability["elite_dropout_mode"] is not None:
+            mode_val, mode_count = stability["elite_dropout_mode"]
+            print(f"  - near_best dropout mode: {mode_val} ({mode_count} trials)")
     print("")
 
 
@@ -190,13 +263,36 @@ def main() -> None:
         Resolve target study directory from CLI args (with default path),
         validate existence, and print a best-trial summary.
     """
-    base = sys.argv[1] if len(sys.argv) > 1 else "outputs/optuna_gpt_labels_trials"
+    parser = argparse.ArgumentParser(
+        description="Summarize best Optuna trial and stability diagnostics."
+    )
+    parser.add_argument(
+        "study_dir",
+        nargs="?",
+        default="",
+        help="Path to study directory containing trial folders.",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=10,
+        help="Top-K trials used for stability summary statistics.",
+    )
+    parser.add_argument(
+        "--rel-band",
+        type=float,
+        default=0.01,
+        help="Near-best relative band (e.g., 0.01 keeps trials within 1%% of best metric).",
+    )
+    args = parser.parse_args()
+
+    base = args.study_dir
     if not os.path.isabs(base):
         base = os.path.abspath(base)
     if not os.path.exists(base):
         print("Path not found:", base)
         return
-    summarize(base)
+    summarize(base, top_k=max(1, args.top_k), rel_band=max(0.0, args.rel_band))
 
 
 if __name__ == "__main__":

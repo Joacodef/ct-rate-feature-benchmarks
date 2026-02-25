@@ -92,3 +92,71 @@ Example:
 python .\scripts\optuna_best_summary.py outputs/optuna_manual_labels_trials/mlp_hidden_dims
 
 ```
+
+## generate_budget_manifests.py
+
+Generates multiple budgeted train manifests for scaling-law experiments while keeping validation fixed.
+
+* Supports two input modes:
+	* `--config-name`: resolves `paths.manifest_dir`, `data.train_manifest`, and `data.val_manifest` from a Hydra config.
+	* Explicit paths: `--train-manifest-path` + `--val-manifest-path`.
+* Creates train subsets for every `(budget, seed)` pair.
+* Writes outputs to a subfolder under the manifest directory (default: `budget_splits`).
+* Emits `manifest_index.csv` with the generated train/val manifest names to use in Hydra overrides.
+* Supports `--sampling-strategy stratified` for multilabel prevalence preservation (requires `iterative-stratification`).
+* Supports repeated copies per budget via `--seeds` to estimate uncertainty.
+
+Typical invocation (recommended with config):
+
+```powershell
+python .\scripts\generate_budget_manifests.py --config-name optuna_manual_labels_config.yaml --budgets 100,250,500,1000,2000 --seeds 42,1234,2025 --copy-validation
+
+```
+
+Stratified example:
+
+```powershell
+python .\scripts\generate_budget_manifests.py --config-name optuna_manual_labels_config.yaml --budgets 100,250,500,1000,2000 --seeds 42,1234,2025 --sampling-strategy stratified --copy-validation
+
+```
+
+> Stratified mode dependency: `pip install iterative-stratification`
+
+Then train with one generated split:
+
+```powershell
+python -m classification.train --config-name optuna_manual_labels_config.yaml paths.manifest_dir=data/manifests/manual/budget_splits data.train_manifest=test_manual_train_n500_s42.csv data.val_manifest=test_manual_valid.csv
+
+```
+
+## evaluate_and_aggregate_runs.py
+
+Evaluates many trained run folders on test manifests and aggregates results to CSV.
+
+* Discovers runs under `--runs-root` by finding `.hydra/config.yaml` + `checkpoints/final_model.pt`.
+* Evaluates every discovered run using the saved run config and checkpoint.
+* Supports overriding test manifest directory via `--test-manifest-dir` (important when train manifests live in `budget_splits`).
+* Writes:
+	* `<prefix>_per_run.csv` (one row per run)
+	* `<prefix>_by_budget.csv` (mean/std/count by `source` and budget `n`)
+
+GPT example:
+
+```powershell
+python .\scripts\evaluate_and_aggregate_runs.py --runs-root outputs/gpt_budget --test-manifest-dir data/manifests/gpt --source gpt --output-prefix gpt_budget
+
+```
+
+Manual example:
+
+```powershell
+python .\scripts\evaluate_and_aggregate_runs.py --runs-root outputs/manual_budget --test-manifest-dir data/manifests/manual --source manual --output-prefix manual_budget
+
+```
+
+Optional explicit test list:
+
+```powershell
+python .\scripts\evaluate_and_aggregate_runs.py --runs-root outputs/gpt_budget --test-manifest-dir data/manifests/gpt --test-manifests test_manual_all.csv,test_manual_train.csv,test_manual_valid.csv
+
+```
