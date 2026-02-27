@@ -78,13 +78,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-depth",
         type=int,
-        default=5,
+        default=3,
         help="Maximum number of hidden layers.",
     )
     parser.add_argument(
         "--sizes",
         type=str,
-        default="64,128,256,512,1024,2048,4096",
+        default="64,128,256,512,1024",
         help="Comma-separated hidden sizes to sample from.",
     )
     parser.add_argument(
@@ -612,7 +612,7 @@ def main() -> None:
             for idx in range(depth)
         ]
         dims = sorted(dims, reverse=True)
-        learning_rate = trial.suggest_float("learning_rate", 1e-5, 3e-4, log=True)
+        learning_rate = trial.suggest_float("learning_rate", 1e-5, 5e-3, log=True)
         dropout = trial.suggest_float("dropout", 0.0, 0.5)
         weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True)
 

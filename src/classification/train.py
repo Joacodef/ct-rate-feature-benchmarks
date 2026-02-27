@@ -4,6 +4,7 @@ import os
 import copy
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import numpy as np
 
 import hydra
 import pandas as pd
@@ -409,8 +410,26 @@ def train_model(cfg: DictConfig) -> float:
             model.parameters(), lr=cfg.training.learning_rate, weight_decay=weight_decay
         )
 
+        # Extract training labels to calculate positive class weights for the loss function
+        if isinstance(dataset_train, Subset):
+            train_indices = dataset_train.indices
+            train_labels_df = dataset_train.dataset.manifest.iloc[train_indices][list(cfg.training.target_labels)]
+        else:
+            train_labels_df = dataset_train.manifest[list(cfg.training.target_labels)]
+
+        # Calculate pos_weight: (number of negative samples) / (number of positive samples) per class
+        # A small epsilon (e.g., max with 1) prevents division by zero if a class has no positive samples
+        num_positives = train_labels_df.sum(axis=0).values
+        num_negatives = len(train_labels_df) - num_positives
+        pos_weight_array = num_negatives / np.maximum(num_positives, 1)
+        
+        pos_weight_tensor = torch.tensor(pos_weight_array, dtype=torch.float32).to(device)
+        
+        log.info(f"Calculated pos_weight tensor for BCEWithLogitsLoss: {pos_weight_tensor.cpu().numpy()}")
+
         log.info("Instantiating loss function.")
-        criterion = hydra.utils.instantiate(cfg.training.loss)
+        # Instantiate the loss function injecting the pos_weight tensor
+        criterion = hydra.utils.instantiate(cfg.training.loss, pos_weight=pos_weight_tensor)
 
         resume_enabled = bool(OmegaConf.select(cfg, "training.resume.enabled", default=False))
         resume_override = OmegaConf.select(cfg, "training.resume.state_path", default=None)
