@@ -4,6 +4,7 @@ import logging
 import math
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.metrics import (
@@ -23,6 +24,7 @@ def compute_metrics(
 	targets: torch.Tensor,
 	label_names: Optional[List[str]] = None,
 	negative_class_name: Optional[str] = None,
+	thresholds: Optional[Union[float, List[float], np.ndarray]] = None,
 ) -> Dict[str, Any]:
 	"""Compute aggregate and optional per-class metrics from model logits.
 
@@ -33,6 +35,7 @@ def compute_metrics(
 			precision/recall/F1/support are added under ``per_class``.
 		negative_class_name: Optional name used for the negative class in
 			single-label/binary output formatting.
+		thresholds: Optional threshold(s) for binarizing predictions when computing metrics. Can be a single float applied to all classes or an array of floats for class-specific thresholds.
 
 	Returns:
 		Dictionary containing macro ``auroc``, ``auprc``, ``f1_macro`` and,
@@ -45,6 +48,11 @@ def compute_metrics(
 	"""
 	preds_prob = torch.sigmoid(preds).detach().cpu().numpy()
 	targets_np = targets.detach().cpu().numpy()
+
+	if thresholds is None:
+		thresholds_np = np.array(0.5)
+	else:
+		thresholds_np = np.array(thresholds)
 
 	try:
 		auroc = roc_auc_score(targets_np, preds_prob, average="macro")
@@ -63,7 +71,7 @@ def compute_metrics(
 		auprc = 0.0
 
 	try:
-		preds_bin_for_macro = (preds_prob >= 0.5).astype(int)
+		preds_bin_for_macro = (preds_prob >= thresholds_np).astype(int)
 		f1_macro = float(
 			f1_score(targets_np, preds_bin_for_macro, average="macro", zero_division=0)
 		)
@@ -78,8 +86,8 @@ def compute_metrics(
 	# If the caller requested per-class metrics, compute precision/recall/f1.
 	if label_names is not None:
 		try:
-			# Binarize predictions at 0.5 for precision/recall/f1 computation
-			preds_bin = (preds_prob >= 0.5).astype(int)
+			# Binarize predictions using the configured thresholds for precision/recall/f1 computation
+			preds_bin = (preds_prob >= thresholds_np).astype(int)
 			if preds_bin.ndim == 1:
 				preds_bin_2d = preds_bin.reshape(-1, 1)
 				targets_2d = targets_np.reshape(-1, 1)
@@ -181,6 +189,7 @@ def evaluate_epoch(
 	device: torch.device,
 	label_names: Optional[List[str]] = None,
 	negative_class_name: Optional[str] = None,
+	thresholds: Optional[Union[float, List[float], np.ndarray]] = None,
 ) -> Tuple[float, Dict[str, Any]]:
 	"""Run one evaluation epoch and compute aggregate validation metrics.
 
@@ -192,6 +201,7 @@ def evaluate_epoch(
 		label_names: Optional class names passed through to metric computation.
 		negative_class_name: Optional negative-class display name for binary
 			per-class metric naming.
+		thresholds: Optional threshold(s) for binarizing predictions when computing metrics. Can be a single float applied to all classes or an array of floats for class-specific thresholds.
 
 	Returns:
 		Tuple ``(avg_loss, metrics)`` where ``avg_loss`` is mean evaluation loss
@@ -230,5 +240,6 @@ def evaluate_epoch(
 		torch.cat(all_labels, dim=0),
 		label_names=label_names,
 		negative_class_name=negative_class_name,
+		thresholds=thresholds,
 	)
 	return avg_loss, metrics
