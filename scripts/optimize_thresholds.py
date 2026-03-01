@@ -60,7 +60,20 @@ def _parse_args() -> argparse.Namespace:
 
 
 def build_loader(manifest_path: str, cfg: DictConfig, shuffle: bool = False) -> DataLoader:
-    """Builds a dataloader for a specific manifest."""
+    """Build a dataloader for a manifest.
+
+    Args:
+        manifest_path: Path to the manifest CSV.
+        cfg: Hydra/OmegaConf runtime config.
+        shuffle: Whether to shuffle samples.
+
+    Returns:
+        Configured ``DataLoader`` instance.
+
+    Logic:
+        Instantiate ``FeatureDataset`` from configured columns and gracefully
+        fallback to visual-only mode when the text feature column is missing.
+    """
     dataset_args = {
         "manifest_path": manifest_path,
         "data_root": cfg.paths.data_root,
@@ -91,7 +104,16 @@ def build_loader(manifest_path: str, cfg: DictConfig, shuffle: bool = False) -> 
 
 @torch.no_grad()
 def extract_probabilities(model: torch.nn.Module, dataloader: DataLoader, device: torch.device) -> Tuple[np.ndarray, np.ndarray]:
-    """Runs inference to extract raw probabilities and ground truths."""
+    """Run inference and collect probabilities and targets.
+
+    Args:
+        model: Trained classification model.
+        dataloader: Evaluation dataloader.
+        device: Torch device for inference.
+
+    Returns:
+        Tuple ``(probs, targets)`` as NumPy arrays with shape ``(N, C)``.
+    """
     model.eval()
     all_probs = []
     all_targets = []
@@ -110,12 +132,21 @@ def extract_probabilities(model: torch.nn.Module, dataloader: DataLoader, device
 
 
 def optimize_per_class_thresholds(probs: np.ndarray, targets: np.ndarray, target_labels: List[str]) -> Tuple[np.ndarray, Dict[str, float]]:
-    """Grid searches the optimal threshold to maximize F1 per class."""
+    """Grid search per-class thresholds that maximize validation F1.
+
+    Args:
+        probs: Predicted probabilities with shape ``(N, C)``.
+        targets: Binary targets with shape ``(N, C)``.
+        target_labels: Human-readable label names.
+
+    Returns:
+        Tuple of per-class threshold vector and per-label threshold/F1 report.
+    """
     num_classes = probs.shape[1]
     best_thresholds = np.zeros(num_classes)
     best_f1_scores = {}
 
-    # Grid search between 0.01 and 0.99 with 99 steps
+    # Grid search thresholds from 0.01 to 0.99.
     threshold_grid = np.linspace(0.01, 0.99, 99)
     
     for c in range(num_classes):
@@ -151,7 +182,7 @@ def main() -> None:
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
 
-    # 1. Load Setup
+    # 1) Load setup.
     cfg = OmegaConf.load(cfg_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     target_labels = list(cfg.training.target_labels)
@@ -171,7 +202,7 @@ def main() -> None:
     if auto_split_enabled:
         train_manifest_path = os.path.normpath(os.path.join(cfg.paths.manifest_dir, cfg.data.train_manifest))
         
-        # Load the base training dataset to perform the split
+        # Load the base training dataset to perform the split.
         dataset_args = {
             "manifest_path": train_manifest_path,
             "data_root": cfg.paths.data_root,
@@ -248,14 +279,14 @@ def main() -> None:
         val_loader = build_loader(val_manifest, cfg)
         log.info(f"Loaded validation data from manifest: {val_manifest}")
 
-    # 2. Extract Validation Probabilities and Optimize Thresholds
+    # 2) Extract validation probabilities and optimize thresholds.
     log.info("Extracting validation probabilities...")
     val_probs, val_targets = extract_probabilities(model, val_loader, device)
     
     log.info("Optimizing per-class thresholds for F1...")
     best_thresholds, threshold_report = optimize_per_class_thresholds(val_probs, val_targets, target_labels)
 
-    # 3. Evaluate on Test Sets with Frozen Thresholds
+    # 3) Evaluate on test sets with frozen thresholds.
     test_manifest_names = args.test_manifests.split(",") if args.test_manifests else list(cfg.data.test_manifests)
     test_manifest_dir = args.test_manifest_dir if args.test_manifest_dir else cfg.paths.manifest_dir
     
@@ -273,7 +304,7 @@ def main() -> None:
             device=device,
             label_names=target_labels,
             negative_class_name=negative_class_name,
-            thresholds=best_thresholds # Inject the custom thresholds!
+            thresholds=best_thresholds,  # Use optimized per-class thresholds.
         )
         
         test_results[manifest_name] = {
@@ -285,7 +316,7 @@ def main() -> None:
         }
         log.info(f"Test {manifest_name} | Optimized F1-Macro: {test_metrics.get('f1_macro', 0.0):.4f}")
 
-    # 4. Save Output Report
+    # 4) Save output report.
     output_dir = run_dir / "evaluation_optimized"
     output_dir.mkdir(exist_ok=True, parents=True)
     report_path = output_dir / "optimized_thresholds_report.json"
