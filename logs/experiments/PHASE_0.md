@@ -1,5 +1,7 @@
 # Phase 0 — Hyperparameter Optimization and Protocol Selection
 
+## ACTION NEEDED: REDO HPO FOR MANUAL LABELS
+
 ## Optuna search (Manual labels)
 - **Status:** completed
 - **Stage:** optuna

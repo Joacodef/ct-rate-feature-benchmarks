@@ -414,6 +414,30 @@ def _aggregate_by_budget(df: pd.DataFrame) -> pd.DataFrame:
     return grouped.sort_values(["source", "budget_n"], na_position="last")
 
 
+def _normalize_metric_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize redundant metric column prefixes for readability.
+
+    Args:
+        df: Dataframe containing per-run or aggregated metric columns.
+
+    Returns:
+        Dataframe with renamed columns when redundant prefixes are found.
+
+    Logic:
+        ``evaluate_model`` emits keys like ``test_<manifest>_<metric>``.
+        When ``<manifest>`` already starts with ``test_``, the resulting column
+        starts with ``test_test_``. This helper normalizes those to ``test_``.
+    """
+    rename_map = {
+        col: col.replace("test_test_", "test_", 1)
+        for col in df.columns
+        if col.startswith("test_test_")
+    }
+    if not rename_map:
+        return df
+    return df.rename(columns=rename_map)
+
+
 def main() -> None:
     """CLI entrypoint for evaluation and aggregation.
 
@@ -460,6 +484,8 @@ def main() -> None:
 
     per_run_df = pd.DataFrame(rows)
     by_budget_df = _aggregate_by_budget(per_run_df)
+    per_run_df = _normalize_metric_column_names(per_run_df)
+    by_budget_df = _normalize_metric_column_names(by_budget_df)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

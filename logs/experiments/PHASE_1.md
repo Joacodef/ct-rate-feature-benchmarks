@@ -1,5 +1,7 @@
 # Phase 1 - Model-Side Bottleneck Checks
 
+## ACTION NEEDED: REDO THRESHOLD TUNING FOR MANUAL LABELS
+
 ## Item 1: Threshold/metric checks
 - **Status:** completed
 - **Goal:** Tune per-label thresholds for F1 on the validation set and recompute the test F1 using those frozen thresholds.
@@ -9,7 +11,7 @@
   ```powershell
   python .\scripts\optimize_thresholds.py --run-dir .\outputs\optuna_manual_labels_studies\best_model_evaluation\best_model_seed_456\2026-02-25_19-25-43\
 
-```
+  ```
 
 * **Results:**
 * Validation F1-Macro (Optimized): $0.6395$

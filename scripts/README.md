@@ -160,3 +160,27 @@ Optional explicit test list:
 python .\scripts\evaluate_and_aggregate_runs.py --runs-root outputs/gpt_budget --test-manifest-dir data/manifests/gpt --test-manifests test_manual_all.csv,test_manual_train.csv,test_manual_valid.csv
 
 ```
+
+## plot_aggregated_runs.py
+
+Plots scaling curves from one or more aggregated `*_by_budget.csv` files.
+
+* Generates one figure per metric (default: AUPRC, AUROC, F1-macro).
+* Uses line plots with error bars (`mean ± std`) across budgets.
+* Supports multiple sources in one plot (e.g., manual + GPT) when multiple CSVs are provided.
+
+Manual-only example:
+
+```powershell
+python .\scripts\plot_aggregated_runs.py --by-budget-csvs outputs/aggregated_results/manual_labels_by_budget.csv --metric-prefix test_manual_all.csv --output-dir outputs/aggregated_results/plots
+
+```
+
+Manual + GPT combined example:
+
+```powershell
+python .\scripts\plot_aggregated_runs.py --by-budget-csvs outputs/aggregated_results/manual_labels_by_budget.csv outputs/aggregated_results/gpt_labels_by_budget.csv --metric-prefix test_manual_all.csv --output-dir outputs/aggregated_results/plots
+
+```
+
+> Tip: if your CSV was generated before the metric-key normalization update and still has `test_test_...` columns, `plot_aggregated_runs.py` accepts either prefix form.
