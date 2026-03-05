@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -166,7 +167,9 @@ def _atomic_torch_save(obj: Any, path: Path) -> None:
         1. Ensure destination directory exists.
         2. Save to a temp file in the same directory.
         3. Replace destination with ``os.replace`` for atomic swap semantics.
-        4. On failure, best-effort delete temp file and re-raise.
+        4. On Windows, retry transient ``PermissionError`` failures that can
+           happen when antivirus/indexers temporarily lock the destination.
+        5. On failure, best-effort delete temp file and re-raise.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -174,7 +177,18 @@ def _atomic_torch_save(obj: Any, path: Path) -> None:
         tmp_path = Path(tmp_file.name)
     try:
         torch.save(obj, tmp_path)
-        os.replace(tmp_path, path)
+
+        # Windows may raise transient PermissionError if another process
+        # briefly holds a handle (e.g., antivirus/indexer).
+        max_replace_attempts = 10
+        for attempt in range(1, max_replace_attempts + 1):
+            try:
+                os.replace(tmp_path, path)
+                break
+            except PermissionError:
+                if attempt == max_replace_attempts:
+                    raise
+                time.sleep(0.05 * attempt)
     except Exception:
         # Best-effort cleanup on failure
         if tmp_path.exists():

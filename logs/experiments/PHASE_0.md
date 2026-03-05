@@ -1,7 +1,5 @@
 # Phase 0 — Hyperparameter Optimization and Protocol Selection
 
-## ACTION NEEDED: REDO HPO FOR MANUAL LABELS
-
 ## Optuna search (Manual labels)
 - **Status:** completed
 - **Stage:** optuna
@@ -17,23 +15,23 @@
 
 ### Summary & Best Hyperparameters
 
-* **Best trial:** `optuna_mlp_t0161`
-* **Best val AUPRC:** $0.6374$
-* **Best val AUROC:** $0.7334$
-* **Best val F1-macro:** $0.5654$
+* **Best trial:** `optuna_mlp_t0182`
+* **Best val AUPRC:** $0.6321$
+* **Best val AUROC:** $0.7214$
+* **Best val F1-macro:** $0.5813$
 
 **Hyperparameters:**
 
-* `learning_rate`: $0.0044$
-* `weight_decay`: $2.389 \times 10^{-5}$
-* `dropout`: $0.465$
-* `hidden_dims`: $[512, 64]$
+* `learning_rate`: $0.0043$
+* `weight_decay`: $1.277 \times 10^{-4}$
+* `dropout`: $0.4096$
+* `hidden_dims`: $[512, 256, 256]$
 * `batch_size`: $64$
 
 **Stability (objective across trials):**
 
-* `usable_trials`: 200 | mean = $0.6086$, median = $0.6132$, std = $0.0184$
-* `top_10`: mean = $0.6321$, median = $0.6316$, std = $0.0031$, min = $0.6283$, max = $0.6374$
+* `usable_trials`: 200 | mean = $0.6029$, median = $0.6067$, std = $0.0202$
+* `top_10`: mean = $0.6280$, median = $0.6282$, std = $0.0032$, min = $0.6237$, max = $0.6321$
 
 ## Optuna search (GPT labels)
 
@@ -86,9 +84,9 @@ The execution overrides the base configuration with the identified best hyperpar
 
 | Metric | Mean | Std | Count |
 | --- | --- | --- | --- |
-| AUPRC | $0.5282$ | $0.0132$ | 5 |
-| AUROC | $0.6605$ | $0.0140$ | 5 |
-| F1-macro | $0.5276$ | $0.0163$ | 5 |
+| AUPRC | $0.6550$ | $0.0991$ | 5 |
+| AUROC | $0.7746$ | $0.0652$ | 5 |
+| F1-macro | $0.6107$ | $0.0729$ | 5 |
 
 ### Aggregated Results (GPT Labels Test Set)
 
@@ -102,8 +100,8 @@ The execution overrides the base configuration with the identified best hyperpar
 
 The hyperparameter optimization successfully identified robust configurations for both manual and GPT-generated labels. The stability evaluation on the test set yields the following comparative insights:
 
-* **Performance:** The model trained on GPT labels outperforms the manual labels model on AUPRC ($0.6017$ vs $0.5282$) and AUROC ($0.7036$ vs $0.6605$).
-* **F1-Macro:** Both models perform similarly in terms of F1-macro ($0.5237$ for GPT vs $0.5276$ for Manual).
-* **Stability:** The GPT-trained model demonstrates lower variance across the 5 evaluation seeds for both AUROC ($\pm 0.0082$ vs $\pm 0.0140$) and F1-macro ($\pm 0.0075$ vs $\pm 0.0163$), indicating a more robust learning dynamic under its optimal hyperparameters.
+* **Performance:** The model trained on manual labels outperforms the GPT-label model on AUPRC ($0.6550$ vs $0.6017$), AUROC ($0.7746$ vs $0.7036$), and F1-macro ($0.6107$ vs $0.5237$).
+* **Variance:** The manual-label evaluation shows larger seed-to-seed spread (AUPRC $\pm 0.0991$, AUROC $\pm 0.0652$, F1-macro $\pm 0.0729$) than the GPT-label baseline (AUPRC $\pm 0.0178$, AUROC $\pm 0.0082$, F1-macro $\pm 0.0075$).
+* **Interpretation:** The manual pipeline improves average performance substantially, while indicating higher sensitivity to initialization/split randomness.
 
 These hyperparameters establish the optimized baselines for the subsequent feature evaluation phases.

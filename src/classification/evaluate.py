@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple
 
 import hydra
 import json
+import pandas as pd
 import torch
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
@@ -41,7 +42,21 @@ def _build_test_loaders(
     test_loaders: List[Tuple[str, DataLoader]] = []
     for manifest_name in manifests:
         manifest_path = os.path.normpath(os.path.join(manifest_root, manifest_name))
-        dataset = FeatureDataset(manifest_path=manifest_path, **dataset_args)
+        manifest_columns = set(pd.read_csv(manifest_path, nrows=0).columns)
+        per_manifest_dataset_args = dict(dataset_args)
+
+        requested_text_col = per_manifest_dataset_args.get("text_feature_col")
+        if requested_text_col and requested_text_col not in manifest_columns:
+            # Some manifests are visual-only; disable text features instead of failing.
+            per_manifest_dataset_args["text_feature_col"] = None
+            log.warning(
+                "Manifest %s does not contain text feature column '%s'; "
+                "evaluating with visual features only.",
+                manifest_path,
+                requested_text_col,
+            )
+
+        dataset = FeatureDataset(manifest_path=manifest_path, **per_manifest_dataset_args)
         dataloader = DataLoader(dataset, shuffle=False, **loader_args)
         test_loaders.append((manifest_name, dataloader))
         log.info("Loaded test data from: %s", manifest_path)
