@@ -14,7 +14,7 @@
 
 - Shared budgets (`100,250,500,800,1000`) must compare **same features/cases**, only labels differ (manual vs GPT).
 - Larger GPT-only budgets (`2000+`) can be sampled independently because there is no manual counterpart at those sizes.
-- Extra seeds added since manual labels runs are quick (2344, 5678, 9012, 3456, 6789, 23423, 54321, 98765, 43210, 11111)
+- Extra seeds added to both manual and GPT runs to ensure rigorous statistical robustness (2344, 5678, 9012, 3456, 6789, 23423, 54321, 98765, 43210, 11111).
 
 ### Manual Labels Manifest Generation
 - **Budgets:** $20, 50, 100, 250, 500, 800, 1191$
@@ -91,25 +91,26 @@ python .\scripts\evaluate_and_aggregate_runs.py --runs-root .\outputs\gpt_budget
 #### Aggregated Results (GPT Labels)
 
 | Budget | AUPRC (Mean ± Std) | AUROC (Mean ± Std) | F1-macro (Mean ± Std) | Seeds |
-| --- | --- | --- | --- | --- |
-| 20 | $0.5058 \pm 0.0173$ | $0.6683 \pm 0.0174$ | $0.4366 \pm 0.0531$ | 5 |
-| 50 | $0.4971 \pm 0.0199$ | $0.6582 \pm 0.0172$ | $0.5031 \pm 0.0559$ | 5 |
-| 100 | $0.5048 \pm 0.0054$ | $0.6689 \pm 0.0168$ | $0.5144 \pm 0.0447$ | 5 |
-| 250 | $0.5114 \pm 0.0150$ | $0.6695 \pm 0.0234$ | $0.4968 \pm 0.0561$ | 5 |
-| 500 | $0.5145 \pm 0.0040$ | $0.6905 \pm 0.0071$ | $0.5213 \pm 0.0198$ | 5 |
-| 800 | $0.5378 \pm 0.0151$ | $0.6991 \pm 0.0081$ | $0.5541 \pm 0.0294$ | 5 |
-| 1191 | $0.5377 \pm 0.0141$ | $0.7044 \pm 0.0125$ | $0.5575 \pm 0.0110$ | 5 |
-| 2000 | $0.5430 \pm 0.0105$ | $0.7078 \pm 0.0075$ | $0.5557 \pm 0.0112$ | 5 |
-| 5000 | $0.5485 \pm 0.0054$ | $0.7107 \pm 0.0047$ | $0.5715 \pm 0.0107$ | 5 |
-| 10000 | $0.5614 \pm 0.0133$ | $0.7147 \pm 0.0061$ | $0.5637 \pm 0.0105$ | 5 |
-| 20000 | $0.5645 \pm 0.0045$ | $0.7182 \pm 0.0042$ | $0.5681 \pm 0.0030$ | 5 |
-| 46438 | $0.5676 \pm 0.0124$ | $0.7169 \pm 0.0064$ | $0.5713 \pm 0.0148$ | 5 |
+|---|---|---|---|---|
+| 20 | $0.4983 \pm 0.0290$ | $0.6586 \pm 0.0313$ | $0.4664 \pm 0.0586$ | 15 |
+| 50 | $0.4982 \pm 0.0336$ | $0.6576 \pm 0.0275$ | $0.5021 \pm 0.0537$ | 15 |
+| 100 | $0.5087 \pm 0.0270$ | $0.6710 \pm 0.0297$ | $0.5074 \pm 0.0594$ | 15 |
+| 250 | $0.5181 \pm 0.0216$ | $0.6768 \pm 0.0203$ | $0.5179 \pm 0.0391$ | 15 |
+| 500 | $0.5210 \pm 0.0157$ | $0.6822 \pm 0.0163$ | $0.5248 \pm 0.0164$ | 15 |
+| 800 | $0.5389 \pm 0.0148$ | $0.6943 \pm 0.0117$ | $0.5506 \pm 0.0216$ | 15 |
+| 1191 | $0.5449 \pm 0.0205$ | $0.7006 \pm 0.0128$ | $0.5511 \pm 0.0166$ | 15 |
+| 2000 | $0.5496 \pm 0.0142$ | $0.7080 \pm 0.0092$ | $0.5525 \pm 0.0195$ | 15 |
+| 5000 | $0.5545 \pm 0.0100$ | $0.7117 \pm 0.0055$ | $0.5634 \pm 0.0174$ | 15 |
+| 10000 | $0.5638 \pm 0.0121$ | $0.7180 \pm 0.0071$ | $0.5666 \pm 0.0129$ | 15 |
+| 20000 | $0.5676 \pm 0.0069$ | $0.7194 \pm 0.0048$ | $0.5653 \pm 0.0105$ | 15 |
+| 46438 | $0.5669 \pm 0.0107$ | $0.7174 \pm 0.0049$ | $0.5746 \pm 0.0114$ | 15 |
+
 
 ## Phase 2 Conclusion
 
 The scaling law study reveals a clear dominance of expert-annotated (manual) labels over GPT-generated labels in the context of training classification heads on frozen visual features.
 
-* **Asymptotic Ceiling:** The model trained on GPT labels reaches its performance ceiling at approximately 46,000+ samples, achieving a maximum F1-macro of $\sim 0.5713$ and an AUPRC of $\sim 0.5676$.
+* **Asymptotic Ceiling:** The model trained on GPT labels reaches its performance ceiling at approximately 46,000+ samples, achieving a maximum F1-macro of $\sim 0.5746$ and an AUPRC of $\sim 0.5669$.
 * **Crossover Point:** The performance curve for manual labels surpasses the asymptotic ceiling of GPT labels at an exceptionally low budget. With only $n=250$ expert-annotated samples, the model achieves an F1-macro of $0.5900$ and an AUPRC of $0.5987$, outperforming the massive GPT budget. The performance continues to scale to an F1-macro of $0.6280$ at $n=1191$.
 * **Variance and Stability:** The evaluation exhibits increasing standard deviation at higher budgets, culminating in significant variance at $n=1191$ (e.g., AUPRC $\pm 0.0944$). Since these results are calculated over a fixed, relatively small final test set (258 samples), this variance does not stem from different test data, but rather reflects the model's high sensitivity to the random seeds. Random variations in weight initialization and the composition of the training/validation splits cause the model to converge to slightly different decision boundaries. When these boundaries are applied to the fixed 258-sample test set, particularly using macro-averaged metrics, minor shifts in the classification of underrepresented findings result in massive swings in the final aggregated scores.
 * **Final Verdict:** The hypothesis that models trained with massive amounts of GPT-generated labels can surpass those trained on a few expert labels is rejected under the current setup. Even with the inherent limitations of the frozen CT-CLIP visual embeddings (representation bottleneck), high-quality manual labels are significantly more sample-efficient and yield a higher absolute performance ceiling.

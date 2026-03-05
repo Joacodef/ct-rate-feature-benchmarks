@@ -140,6 +140,7 @@ Interpretation categories:
 - Repeat key points with alternate split seed.
 - Repeat with one stronger backbone setting (if feasible).
 - Check whether conclusions about crossover are stable.
+- **Per-Class Bottleneck Analysis:** Compare class-level metrics (Precision, Recall, F1) between the best expert-label model and the asymptotic GPT-label model to identify specific LLM weaknesses.
 
 ---
 
@@ -164,6 +165,7 @@ Action:
 4. One representation stress test (e.g., linear probe or partial unfreeze).
 5. One representation stress test (e.g., larger MLP or partial unfreeze).
 6. Crossover estimate + uncertainty.
+7. Per-class performance breakdown comparing the optimal expert model vs. the asymptotic GPT model.
 
 This MVP is sufficient to answer the main question with defensible evidence.
 
