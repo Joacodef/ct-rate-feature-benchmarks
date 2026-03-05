@@ -1,5 +1,7 @@
 # Phase 2 — Scaling Law Study (Core Objective)
 
+## ACTION NEEDED: REDO SCALING LAW STUDY FOR MANUAL LABELS, REDO CONCLUSIONS
+
 ## Item 0: Generate Budget Manifests
 - **Status:** planned
 - **Goal:** Create reproducible training subsets for both label sources across 5 seeds ($42, 123, 456, 789, 999$).
