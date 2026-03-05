@@ -156,6 +156,8 @@ def _plot_metric(
     plot_df[mean_col] = pd.to_numeric(plot_df[mean_col], errors="coerce")
     plot_df[std_col] = pd.to_numeric(plot_df[std_col], errors="coerce").fillna(0.0)
     plot_df = plot_df.dropna(subset=["budget_n", mean_col]).sort_values("budget_n")
+    # Log-scale x-axis requires strictly positive values.
+    plot_df = plot_df[plot_df["budget_n"] > 0]
 
     if plot_df.empty:
         raise RuntimeError(f"No plottable rows found for metric '{metric_name}'.")
@@ -177,6 +179,7 @@ def _plot_metric(
     ax.set_title(f"{title_metric} vs Budget ({resolved_prefix})")
     ax.set_xlabel("Budget (n)")
     ax.set_ylabel(f"Mean {title_metric}")
+    ax.set_xscale("log")
     ax.set_ylim(0.0, 1.0)
     ax.grid(True, alpha=0.3)
     ax.legend(title="Source")

@@ -7,9 +7,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$seeds = @(42, 123, 456, 789, 999)
-$manualBudgets = @(1191) # original: (20, 50, 100, 250, 500, 800, 1071)
-$gptBudgets = @(1071, 46438) # original: (20, 50, 100, 250, 500, 800, 1071, 2000, 5000, 10000, 20000, 40000)
+$seeds = @(42, 123, 456, 789, 999, 2344, 5678, 9012, 3456, 6789, 23423, 54321, 98765, 43210, 11111)
+$manualBudgets = @(20,50,100,250,500,800,1191)
+$gptBudgets = @(20, 50, 100, 250, 500, 800, 1191, 2000, 5000, 10000, 20000, 46438)
 
 $manualConfig = "best_manual_labels_config.yaml"
 $gptConfig = "best_gpt_labels_config.yaml"
@@ -20,8 +20,10 @@ $gptHydraJobName = "gpt_budget"
 $manualRunsRoot = "outputs/manual_budget"
 $gptRunsRoot = "outputs/gpt_budget"
 
-$manualManifestPrefix = "manual_budget_splits/test_manual_train"
+$manualManifestPrefix = "manual_budget_splits/train"
 $gptManifestPrefix = "gpt_budget_splits/all"
+$manualManifestRoot = "data/manifests/manual"
+$gptManifestRoot = "data/manifests/gpt"
 
 $logDir = "outputs/phase2_sweep_logs"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -33,6 +35,7 @@ function Invoke-TrainingRun {
         [Parameter(Mandatory = $true)][string]$ConfigName,
         [Parameter(Mandatory = $true)][string]$TrainManifestPath,
         [Parameter(Mandatory = $true)][string]$ValManifestPath,
+        [Parameter(Mandatory = $true)][string]$ManifestRoot,
         [Parameter(Mandatory = $true)][string]$HydraJobName,
         [Parameter(Mandatory = $true)][string]$RunDir,
         [Parameter(Mandatory = $true)][int]$Seed,
@@ -40,6 +43,16 @@ function Invoke-TrainingRun {
     )
 
     $finalCheckpoint = Join-Path $RunDir "checkpoints/final_model.pt"
+    $resolvedTrainManifest = Join-Path $ManifestRoot $TrainManifestPath
+    $resolvedValManifest = Join-Path $ManifestRoot $ValManifestPath
+
+    if (-not (Test-Path $resolvedTrainManifest)) {
+        throw "Train manifest not found: $resolvedTrainManifest"
+    }
+
+    if (-not (Test-Path $resolvedValManifest)) {
+        throw "Validation manifest not found: $resolvedValManifest"
+    }
 
     if ((-not $Force) -and (Test-Path $finalCheckpoint)) {
         Write-Host "[SKIP] budget=$Budget seed=$Seed already completed: $finalCheckpoint"
@@ -79,6 +92,7 @@ function Invoke-Sweep {
         [Parameter(Mandatory = $true)][string]$ConfigName,
         [Parameter(Mandatory = $true)][string]$HydraJobName,
         [Parameter(Mandatory = $true)][string]$RunsRoot,
+        [Parameter(Mandatory = $true)][string]$ManifestRoot,
         [Parameter(Mandatory = $true)][string]$ManifestPrefix
     )
 
@@ -92,6 +106,7 @@ function Invoke-Sweep {
                 -ConfigName $ConfigName `
                 -TrainManifestPath $trainManifest `
                 -ValManifestPath $valManifest `
+                -ManifestRoot $ManifestRoot `
                 -HydraJobName $HydraJobName `
                 -RunDir $runDir `
                 -Seed $seed `
@@ -108,6 +123,7 @@ try {
             -ConfigName $manualConfig `
             -HydraJobName $manualHydraJobName `
             -RunsRoot $manualRunsRoot `
+            -ManifestRoot $manualManifestRoot `
             -ManifestPrefix $manualManifestPrefix
     }
 
@@ -118,6 +134,7 @@ try {
             -ConfigName $gptConfig `
             -HydraJobName $gptHydraJobName `
             -RunsRoot $gptRunsRoot `
+            -ManifestRoot $gptManifestRoot `
             -ManifestPrefix $gptManifestPrefix
     }
 
