@@ -41,7 +41,7 @@ Evaluate the robustness and sensitivity of the scaling law conclusions drawn in 
 
 ## Item 3: Per-Class Bottleneck Analysis
 - **Status:** completed
-- **Goal:** Identify specific LLM weaknesses in label generation by comparing class-level performance.
+- **Goal:** Characterize label-source differences at the class level by comparing class-level performance.
 - **Protocol:**
   - Extract per-class metrics (Precision, Recall, F1) from the asymptotic GPT model (from Item 1).
   - Extract per-class metrics from the optimal manual model (derived from Item 2).
@@ -65,4 +65,9 @@ Evaluate the robustness and sensitivity of the scaling law conclusions drawn in 
   - For the evaluated 5-label setup, no class shows a positive mean $\Delta$F1; GPT is equal or better than manual-label models across all classes.
   - The largest performance gap appears in **Lung nodule** ($\Delta$F1 $=-0.0763 \pm 0.0609$), driven mainly by recall difference ($\Delta$recall $=-0.1243 \pm 0.0700$).
   - The smallest gap is **Arterial wall calcification** ($\Delta$F1 $=-0.0165 \pm 0.0191$), where manual shows slightly better precision but lower recall.
-  - Under this protocol, the expected "GPT bottleneck" pattern is not observed; instead, GPT labels appear to provide stronger per-class supervision for the selected targets.
+  - Under this protocol, the expected "GPT bottleneck" pattern is not observed for the selected targets.
+
+## Phase 3 Interpretation Note
+
+- This phase provides a robustness/sensitivity view and should be interpreted alongside Phase 2, not as a strict replacement of the fixed-split scaling conclusion.
+- The per-class comparison uses a fixed asymptotic GPT checkpoint and fold-trained manual checkpoints, so cross-source interpretation should account for this checkpoint-selection asymmetry.

@@ -102,6 +102,6 @@ The hyperparameter optimization successfully identified robust configurations fo
 
 * **Performance:** The model trained on manual labels outperforms the GPT-label model on AUPRC ($0.6550$ vs $0.6017$), AUROC ($0.7746$ vs $0.7036$), and F1-macro ($0.6107$ vs $0.5237$).
 * **Variance:** The manual-label evaluation shows larger seed-to-seed spread (AUPRC $\pm 0.0991$, AUROC $\pm 0.0652$, F1-macro $\pm 0.0729$) than the GPT-label baseline (AUPRC $\pm 0.0178$, AUROC $\pm 0.0082$, F1-macro $\pm 0.0075$).
-* **Interpretation:** The manual pipeline improves average performance substantially, while indicating higher sensitivity to initialization/split randomness.
+* **Interpretation (Phase-0 protocol):** Under this initial split-and-seed evaluation, the manual pipeline improves average performance substantially, while indicating higher sensitivity to initialization/split randomness.
 
 These hyperparameters establish the optimized baselines for the subsequent feature evaluation phases.

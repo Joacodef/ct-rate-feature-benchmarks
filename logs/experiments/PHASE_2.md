@@ -12,7 +12,7 @@
 
 ### Reproducibility contract (shared budgets)
 
-- Shared budgets (`100,250,500,800,1000`) must compare **same features/cases**, only labels differ (manual vs GPT).
+- Shared budgets (`100,250,500,800,1191`) must compare **same features/cases**, only labels differ (manual vs GPT).
 - Larger GPT-only budgets (`2000+`) can be sampled independently because there is no manual counterpart at those sizes.
 - Extra seeds added to both manual and GPT runs to ensure rigorous statistical robustness (2344, 5678, 9012, 3456, 6789, 23423, 54321, 98765, 43210, 11111).
 
@@ -25,7 +25,7 @@
 
 ### GPT Labels Manifest Generation
 
-* **Budgets:** $20, 50, 100, 250, 500, 800, 1071, 2000, 5000, 10000, 20000, 46438$
+* **Budgets:** $20, 50, 100, 250, 500, 800, 1191, 2000, 5000, 10000, 20000, 46438$
 * **Command:**
 
 ```powershell
@@ -108,9 +108,9 @@ python .\scripts\evaluate_and_aggregate_runs.py --runs-root .\outputs\gpt_budget
 
 ## Phase 2 Conclusion
 
-The scaling law study reveals a clear dominance of expert-annotated (manual) labels over GPT-generated labels in the context of training classification heads on frozen visual features.
+Under the fixed-split, multi-seed scaling protocol used in this phase, expert-annotated (manual) labels outperform GPT-generated labels for training classification heads on frozen visual features.
 
 * **Asymptotic Ceiling:** The model trained on GPT labels reaches its performance ceiling at approximately 46,000+ samples, achieving a maximum F1-macro of $\sim 0.5746$ and an AUPRC of $\sim 0.5669$.
 * **Crossover Point:** The performance curve for manual labels surpasses the asymptotic ceiling of GPT labels at an exceptionally low budget. With only $n=250$ expert-annotated samples, the model achieves an F1-macro of $0.5900$ and an AUPRC of $0.5987$, outperforming the massive GPT budget. The performance continues to scale to an F1-macro of $0.6280$ at $n=1191$.
 * **Variance and Stability:** The evaluation exhibits increasing standard deviation at higher budgets, culminating in significant variance at $n=1191$ (e.g., AUPRC $\pm 0.0944$). Since these results are calculated over a fixed, relatively small final test set (258 samples), this variance does not stem from different test data, but rather reflects the model's high sensitivity to the random seeds. Random variations in weight initialization and the composition of the training/validation splits cause the model to converge to slightly different decision boundaries. When these boundaries are applied to the fixed 258-sample test set, particularly using macro-averaged metrics, minor shifts in the classification of underrepresented findings result in massive swings in the final aggregated scores.
-* **Final Verdict:** The hypothesis that models trained with massive amounts of GPT-generated labels can surpass those trained on a few expert labels is rejected under the current setup. Even with the inherent limitations of the frozen CT-CLIP visual embeddings (representation bottleneck), high-quality manual labels are significantly more sample-efficient and yield a higher absolute performance ceiling.
+* **Final Verdict (Phase-2 protocol):** The hypothesis that massive GPT-label training can surpass few-shot expert-label training is rejected for this fixed-split setup. Within this protocol, manual labels are more sample-efficient and reach a higher observed ceiling. Phase 3 is used to test the robustness of this conclusion under fold-based evaluation.
