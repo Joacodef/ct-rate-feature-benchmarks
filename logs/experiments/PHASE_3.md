@@ -8,12 +8,12 @@ Evaluate the robustness and sensitivity of the scaling law conclusions drawn in 
 - **Goal:** Establish a stable and precise asymptotic ceiling for models trained on GPT-generated labels.
 - **Protocol:**
   - Select the optimal model checkpoint trained on the maximum GPT label budget (e.g., $N=46,438$) from Phase 2.
-  - Evaluate this asymptotic model directly against the entirety of the available manual label dataset ($N=1191$).
-  - Calculate and record the aggregated metrics (AUPRC, AUROC, F1-macro).
+  - Evaluate this asymptotic model across the 5 hold-out test folds generated for the manual labels $K$-Fold Cross-Validation.
+  - Calculate and record the aggregated metrics (AUPRC, AUROC, F1-macro) as the mean $\pm$ standard deviation across the 5 folds.
 - **Results:**
-  - **AUPRC:** $0.5563 \pm 0.0056$
-  - **AUROC:** $0.7298 \pm 0.0029$
-  - **F1-macro:** $0.5748 \pm 0.0070$
+  - **AUPRC:** $0.5617 \pm 0.0355$
+  - **AUROC:** $0.7296 \pm 0.0272$
+  - **F1-macro:** $0.5756 \pm 0.0228$
 
 ## Item 2: $K$-Fold Cross-Validation (Manual Labels)
 - **Status:** completed
@@ -25,7 +25,7 @@ Evaluate the robustness and sensitivity of the scaling law conclusions drawn in 
   - Evaluate each trained budget model on the corresponding hold-out test segment of the current fold.
   - Aggregate the metrics (mean $\pm$ std) across all $K$ folds to plot the final unbiased scaling curve.
 - **Results (5-fold aggregated, primary hold-out metrics):**
-  - **$N=20$:** AUPRC $0.4595 \pm 0.0330$, AUROC $0.6300 \pm 0.0342$, F1-macro $0.2281 \pm 0.0242$
+  - **$N=20$:** AUPRC $0.4647 \pm 0.0348$, AUROC $0.6365 \pm 0.0334$, F1-macro $0.4240 \pm 0.0852$
   - **$N=50$:** AUPRC $0.5110 \pm 0.0282$, AUROC $0.6856 \pm 0.0169$, F1-macro $0.4824 \pm 0.1180$
   - **$N=100$:** AUPRC $0.4983 \pm 0.0275$, AUROC $0.6758 \pm 0.0171$, F1-macro $0.4516 \pm 0.1120$
   - **$N=250$:** AUPRC $0.5089 \pm 0.0335$, AUROC $0.6837 \pm 0.0233$, F1-macro $0.5263 \pm 0.0525$
@@ -34,10 +34,10 @@ Evaluate the robustness and sensitivity of the scaling law conclusions drawn in 
   - **$N=1191$:** AUPRC $0.5359 \pm 0.0138$, AUROC $0.7008 \pm 0.0225$, F1-macro $0.5366 \pm 0.0129$
   - **$N=1520$:** AUPRC $0.5288 \pm 0.0379$, AUROC $0.6910 \pm 0.0242$, F1-macro $0.5252 \pm 0.0359$
 - **Conclusions:**
-  - The manual-label scaling curve shows clear gains from very low budgets to the mid/high-budget regime, with a robust transition between $N=20$ and $N\in[500, 800]$.
+  - The manual-label scaling curve demonstrates stable and continuous gains from a properly balanced few-shot baseline ($N=20$) to the mid/high-budget regime, with a robust transition towards $N \in [500, 800]$.
   - Performance plateaus around $N=800$ to $N=1191$ (AUPRC and AUROC improvements are marginal beyond this region).
   - The $N=1520$ point does not improve the curve and is slightly worse than $N=1191$, suggesting diminishing returns and/or fold-train-pool ceiling effects.
-  - Variance (std) is largest at low budgets (especially F1 at $N=50$ and $N=100$), and generally decreases at higher budgets, supporting the robustness objective of Item 2.
+  - Variance (std) is most pronounced at low budgets (specifically F1 at $N=20$, $N=50$, and $N=100$), and generally decreases at higher budgets, corroborating the expected instability of the few-shot regime and supporting the robustness objective of Item 2.
 
 ## Item 3: Per-Class Bottleneck Analysis
 - **Status:** completed
@@ -63,6 +63,6 @@ Evaluate the robustness and sensitivity of the scaling law conclusions drawn in 
   - **Lung nodule:** Manual F1 $0.4666 \pm 0.0335$, GPT F1 $0.5429 \pm 0.0549$, $\Delta$F1 $-0.0763 \pm 0.0609$
 - **Conclusions:**
   - For the evaluated 5-label setup, no class shows a positive mean $\Delta$F1; GPT is equal or better than manual-label models across all classes.
-  - The largest performance gap appears in **Lung nodule** ($\Delta$F1 $=-0.0763$), driven mainly by recall difference ($\Delta$recall $=-0.1243$).
-  - The smallest gap is **Arterial wall calcification** ($\Delta$F1 $=-0.0165$), where manual shows slightly better precision but lower recall.
+  - The largest performance gap appears in **Lung nodule** ($\Delta$F1 $=-0.0763 \pm 0.0609$), driven mainly by recall difference ($\Delta$recall $=-0.1243 \pm 0.0700$).
+  - The smallest gap is **Arterial wall calcification** ($\Delta$F1 $=-0.0165 \pm 0.0191$), where manual shows slightly better precision but lower recall.
   - Under this protocol, the expected "GPT bottleneck" pattern is not observed; instead, GPT labels appear to provide stronger per-class supervision for the selected targets.

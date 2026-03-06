@@ -204,26 +204,51 @@ def _split_sampled_train_val(
     if grouped.shape[0] < 2:
         raise ValueError("Need at least 2 groups in sampled subset to create train/val splits.")
 
-    # Keep at least one train group and one val group for tiny budgets.
-    test_size = max(1, int(round(grouped.shape[0] * val_fraction)))
-    test_size = min(test_size, grouped.shape[0] - 1)
+    # Calculate initial validation size based on the specified fraction.
+    base_test_size = int(round(grouped.shape[0] * val_fraction))
+    
+    # Establish a minimum validation size equivalent to the number of target labels
+    # to support optimal multi-label stratification representation.
+    min_required_test_size = max(1, len(labels))
+    
+    # Constrain the maximum validation size to 40% of total available groups
+    # to prevent severe depletion of the primary training partition.
+    max_allowed_test_size = max(1, int(grouped.shape[0] * 0.4))
+    
+    test_size = max(base_test_size, min_required_test_size)
+    test_size = min(test_size, max_allowed_test_size, grouped.shape[0] - 1)
 
-    stratify_values = None
     if val_stratify and grouped.shape[1] > 0:
-        if grouped.shape[1] == 1:
-            stratify_values = grouped.iloc[:, 0]
-        else:
-            stratify_values = grouped.astype(str).agg("|".join, axis=1)
+        try:
+            from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
+        except ImportError as exc:
+            raise ImportError(
+                "Validation stratification requires iterative-stratification. Install with: "
+                "pip install iterative-stratification"
+            ) from exc
 
-    try:
-        train_groups, val_groups = train_test_split(
-            grouped.index.to_list(),
-            test_size=test_size,
-            random_state=seed,
-            shuffle=True,
-            stratify=stratify_values,
+        x_dummy = [[0.0] for _ in range(grouped.shape[0])]
+        y = grouped.to_numpy(dtype=int)
+
+        splitter = MultilabelStratifiedShuffleSplit(
+            n_splits=1, test_size=test_size, random_state=seed
         )
-    except ValueError:
+
+        group_names = grouped.index.to_numpy()
+        
+        try:
+            train_idx, val_idx = next(splitter.split(x_dummy, y))
+            train_groups = [str(group_names[idx]) for idx in train_idx]
+            val_groups = [str(group_names[idx]) for idx in val_idx]
+        except ValueError:
+            train_groups, val_groups = train_test_split(
+                grouped.index.to_list(),
+                test_size=test_size,
+                random_state=seed,
+                shuffle=True,
+                stratify=None,
+            )
+    else:
         train_groups, val_groups = train_test_split(
             grouped.index.to_list(),
             test_size=test_size,
