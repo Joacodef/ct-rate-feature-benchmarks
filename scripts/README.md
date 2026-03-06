@@ -129,6 +129,47 @@ python -m classification.train --config-name optuna_manual_labels_config.yaml pa
 
 ```
 
+## generate_kfold_budget_manifests.py
+
+Generates fold-aware manifests for Phase 3 manual-label K-fold cross-validation.
+
+* Splits a full manual-label manifest into `K` grouped multilabel-stratified folds.
+* Writes one hold-out test manifest per fold.
+* For each `(fold, budget)`, samples budget rows from that fold's training pool only.
+* Splits each sampled subset into train/val manifests for model selection.
+* Writes a `manifest_index.csv` used by the Phase 3 sweep runner.
+
+Example:
+
+```powershell
+python .\scripts\generate_kfold_budget_manifests.py --config-name best_manual_labels_config.yaml --full-manifest-name all.csv --k-folds 5 --budgets 20,50,100,250,500,800,1191 --seed 52 --output-subdir manual_kfold_budget_splits --prefix manual_kfold
+
+```
+
+> Note: If a requested budget exceeds a fold's train-pool size, the script caps it and records both requested and effective budgets in `manifest_index.csv`.
+
+## run_phase3_manual_kfold_sweep.ps1
+
+Runs one deterministic training job per `(fold, budget)` from the generated Phase 3 index.
+
+* Reads `manifest_index.csv` from the K-fold generator output.
+* Trains with fixed seed (`utils.seed`) and fold-specific train/val manifests.
+* Stores one run folder per fold-budget pair under `outputs/manual_kfold_budget`.
+* By default runs `evaluate_and_aggregate_runs.py` at the end.
+
+Example:
+
+```powershell
+.\scripts\run_phase3_manual_kfold_sweep.ps1 -ConfigName best_manual_labels_config.yaml -ManifestRoot data/manifests/manual/manual_kfold_budget_splits -ManifestIndexPath data/manifests/manual/manual_kfold_budget_splits/manifest_index.csv -Seed 52
+
+```
+
+Options:
+
+* `-Force`: retrain completed runs.
+* `-StopOnError`: stop immediately on first failed run.
+* `-SkipAggregate`: skip final aggregate evaluation.
+
 ## evaluate_and_aggregate_runs.py
 
 Evaluates many trained run folders on test manifests and aggregates results to CSV.
@@ -139,6 +180,7 @@ Evaluates many trained run folders on test manifests and aggregates results to C
 * Writes:
 	* `<prefix>_per_run.csv` (one row per run)
 	* `<prefix>_by_budget.csv` (mean/std/count by `source` and budget `n`)
+* Adds canonical columns `test_primary_auprc`, `test_primary_auroc`, and `test_primary_f1_macro` by averaging all per-run `test_*` metrics. This is important for K-fold runs where each fold has a different hold-out manifest name.
 
 GPT example:
 
@@ -176,10 +218,35 @@ python .\scripts\plot_aggregated_runs.py --by-budget-csvs outputs/aggregated_res
 
 ```
 
+Phase 3 K-fold example (uses canonical primary test metric columns):
+
+```powershell
+python .\scripts\plot_aggregated_runs.py --by-budget-csvs outputs/aggregated_results/manual_kfold_budget_by_budget.csv --metric-prefix test_primary --output-dir outputs/aggregated_results/plots
+
+```
+
 Manual + GPT combined example:
 
 ```powershell
 python .\scripts\plot_aggregated_runs.py --by-budget-csvs outputs/aggregated_results/manual_labels_by_budget.csv outputs/aggregated_results/gpt_labels_by_budget.csv --metric-prefix test_manual_all.csv --output-dir outputs/aggregated_results/plots
+
+```
+
+## compare_per_class_bottlenecks.py
+
+Compares per-class metrics between manual and GPT models using detailed metric JSON files.
+
+* Aligns rows by `(fold, class)` from manifest names such as `manual_kfold_f1_test.csv`.
+* Computes paired deltas (`manual - gpt`) for precision, recall, and F1.
+* Writes:
+	* `<prefix>_paired.csv` (one row per fold/class pair)
+	* `<prefix>_summary.csv` (mean/std/count by class)
+* Optional markdown output for reporting.
+
+Phase 3 Item 3 example:
+
+```powershell
+python .\scripts\compare_per_class_bottlenecks.py --manual-glob "outputs/manual_kfold_budget/f*_n1191_s52/evaluation_aggregate/detailed_metrics/manual_kfold_f*_test.csv_detailed_metrics.json" --gpt-glob "outputs/gpt_budget/train_n46438_s11111/evaluation_aggregate/detailed_metrics/manual_kfold_f*_test.csv_detailed_metrics.json" --output-prefix outputs/aggregated_results/per_class_bottleneck --output-markdown outputs/aggregated_results/per_class_bottleneck_summary.md
 
 ```
 

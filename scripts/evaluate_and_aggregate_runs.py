@@ -153,20 +153,52 @@ def _extract_budget_seed(train_manifest: Optional[str]) -> Dict[str, Optional[in
         train_manifest: Train manifest filename.
 
     Returns:
-        Dict with optional integer keys ``budget_n`` and ``split_seed``.
+        Dict with optional integer keys ``budget_n``, ``split_seed``, and
+        ``cv_fold``.
     """
     if not train_manifest:
-        return {"budget_n": None, "split_seed": None}
+        return {"budget_n": None, "split_seed": None, "cv_fold": None}
 
     name = Path(train_manifest).name
     match = re.search(r"_n(\d+)_s(\d+)", name)
-    if not match:
-        return {"budget_n": None, "split_seed": None}
+    fold_match = re.search(r"_f(\d+)", name)
 
-    return {
-        "budget_n": int(match.group(1)),
-        "split_seed": int(match.group(2)),
+    payload: Dict[str, Optional[int]] = {
+        "budget_n": None,
+        "split_seed": None,
+        "cv_fold": None,
     }
+    if fold_match:
+        payload["cv_fold"] = int(fold_match.group(1))
+    if match:
+        payload["budget_n"] = int(match.group(1))
+        payload["split_seed"] = int(match.group(2))
+    return payload
+
+
+def _add_primary_test_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    """Add canonical per-run test metrics independent of manifest naming.
+
+    This is useful for K-fold CV where each run evaluates a different
+    fold-specific test manifest name (e.g., ``test_manual_kfold_f1_test_*``).
+    The helper computes row-wise means across all test metric columns matching
+    each metric family, yielding stable columns:
+    ``test_primary_auprc``, ``test_primary_auroc``, ``test_primary_f1_macro``.
+    """
+    if df.empty:
+        return df
+
+    out = df.copy()
+    for metric_name in ("auprc", "auroc", "f1_macro"):
+        pattern = re.compile(rf"^test_(?!primary_).+_{metric_name}$")
+        metric_cols = [col for col in out.columns if pattern.match(col)]
+        if not metric_cols:
+            continue
+
+        numeric = out[metric_cols].apply(pd.to_numeric, errors="coerce")
+        out[f"test_primary_{metric_name}"] = numeric.mean(axis=1, skipna=True)
+
+    return out
 
 
 def _load_latest_run_metrics(run_dir: Path) -> Dict[str, Optional[float]]:
@@ -356,6 +388,7 @@ def _evaluate_one_run(
         "val_manifest": val_manifest,
         "budget_n": parsed["budget_n"],
         "split_seed": parsed["split_seed"],
+        "cv_fold": parsed["cv_fold"],
         "utils_seed": OmegaConf.select(cfg, "utils.seed", default=None),
         "learning_rate": OmegaConf.select(cfg, "training.learning_rate", default=None),
         "weight_decay": OmegaConf.select(cfg, "training.weight_decay", default=None),
@@ -483,8 +516,9 @@ def main() -> None:
         rows.append(row)
 
     per_run_df = pd.DataFrame(rows)
-    by_budget_df = _aggregate_by_budget(per_run_df)
     per_run_df = _normalize_metric_column_names(per_run_df)
+    per_run_df = _add_primary_test_metrics(per_run_df)
+    by_budget_df = _aggregate_by_budget(per_run_df)
     by_budget_df = _normalize_metric_column_names(by_budget_df)
 
     output_dir = Path(args.output_dir)

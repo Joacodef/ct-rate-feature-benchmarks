@@ -42,11 +42,23 @@ def _build_test_loaders(
     test_loaders: List[Tuple[str, DataLoader]] = []
     for manifest_name in manifests:
         manifest_path = os.path.normpath(os.path.join(manifest_root, manifest_name))
-        manifest_columns = set(pd.read_csv(manifest_path, nrows=0).columns)
+        manifest_columns = None
+        if os.path.exists(manifest_path):
+            manifest_columns = set(pd.read_csv(manifest_path, nrows=0).columns)
+        else:
+            log.debug(
+                "Manifest path does not exist at header-probe time: %s. "
+                "Skipping text-column compatibility check.",
+                manifest_path,
+            )
         per_manifest_dataset_args = dict(dataset_args)
 
         requested_text_col = per_manifest_dataset_args.get("text_feature_col")
-        if requested_text_col and requested_text_col not in manifest_columns:
+        if (
+            requested_text_col
+            and manifest_columns is not None
+            and requested_text_col not in manifest_columns
+        ):
             # Some manifests are visual-only; disable text features instead of failing.
             per_manifest_dataset_args["text_feature_col"] = None
             log.warning(
