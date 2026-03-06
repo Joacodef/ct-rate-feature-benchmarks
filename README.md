@@ -23,7 +23,17 @@ ct-rate-feature-benchmarks/
 │  └─ radiology_text_reports/
 ├─ scripts/
 │  ├─ analyze_alignment.py
-│  └─ prepare_manifests.py
+│  ├─ create_manual_label_files.py
+│  ├─ create_volumename_csv.py
+│  ├─ evaluate_and_aggregate_runs.py
+│  ├─ generate_budget_manifests.py
+│  ├─ optimize_thresholds.py
+│  ├─ optuna_best_summary.py
+│  ├─ optuna_mlp_search.py
+│  ├─ plot_aggregated_runs.py
+│  ├─ prepare_manifests.py
+│  ├─ run_phase2_budget_sweep.ps1
+│  └─ README.md
 ├─ src/
 │  ├─ classification/
 │  │  ├─ loops.py          # Training/eval loops & metrics
@@ -125,17 +135,39 @@ Provide split manifests in `paths.manifest_dir` (defaults to `data/manifests`):
 - `train.csv`, `valid.csv`
 - `test_manual_all.csv`, `test_manual_train.csv`, `test_manual_valid.csv`
 
-The repository includes helper data and scripts under `data/` and `scripts/` for preparing and inspecting manifests (see `scripts/prepare_manifests.py`).
+The repository includes helper data and scripts under `data/` and `scripts/` for manifest prep, search/sweep workflows, and post-hoc analysis. See `scripts/README.md` for full per-script details.
 
-## Alignment analysis
+## Scripts
 
-Analyze cross-modal retrieval quality with the Hydra-enabled script in `scripts/analyze_alignment.py`.
+Current utility scripts in `scripts/` include:
+
+- Data and manifest preparation:
+  - `prepare_manifests.py` for building training/evaluation manifests.
+  - `create_volumename_csv.py` for creating base CSVs from feature filenames.
+  - `create_manual_label_files.py` for generating manual-label `train.csv`/`val.csv` from accession mappings.
+- Retrieval/alignment analysis:
+  - `analyze_alignment.py` for visual-text retrieval metrics and optional semantic matching metrics.
+- Hyperparameter search:
+  - `optuna_mlp_search.py` to run Optuna sweeps over MLP/training hyperparameters.
+  - `optuna_best_summary.py` to summarize the best Optuna trial in a study folder.
+- Budget/scaling workflows:
+  - `generate_budget_manifests.py` to create budgeted train manifests across budgets and seeds.
+  - `run_phase2_budget_sweep.ps1` to orchestrate large manual/GPT budget sweeps.
+  - `evaluate_and_aggregate_runs.py` to evaluate many runs and export per-run plus by-budget CSVs.
+  - `plot_aggregated_runs.py` to plot scaling curves from aggregated results.
+- Evaluation calibration:
+  - `optimize_thresholds.py` to tune per-label validation thresholds and re-evaluate test manifests.
+
+Example commands:
 
 ```powershell
+python .\scripts\prepare_manifests.py --labels_csv data/labels.csv --split_csv data/train_split.csv --output_file data/manifests/train.csv
 python .\scripts\analyze_alignment.py data.train_manifest="train_medium.csv"
+python .\scripts\optuna_mlp_search.py --study-name mlp_hidden_dims --n-trials 20
+python .\scripts\generate_budget_manifests.py --config-name optuna_manual_labels_config.yaml --budgets 100,250,500 --seeds 42,1234 --copy-validation
+python .\scripts\evaluate_and_aggregate_runs.py --runs-root outputs/manual_budget --test-manifest-dir data/manifests/manual --source manual --output-prefix manual_budget
+python .\scripts\plot_aggregated_runs.py --by-budget-csvs outputs/aggregated_results/manual_labels_by_budget.csv --metric-prefix test_manual_all.csv --output-dir outputs/aggregated_results/plots
 ```
-
-The script loads precomputed features, builds an instance-level ground-truth mask by trimming reconstruction suffixes (for example `train_2_a_1` → `train_2_a`), and reports Recall@K plus paired/unpaired similarity stats. If the configured manifest exposes label columns (`data.columns.labels`), it also emits "semantic" metrics that count any pair sharing the exact same label vector as correct (useful when multiple reconstructions or modalities share findings).
 
 ## Testing
 

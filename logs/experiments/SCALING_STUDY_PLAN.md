@@ -137,9 +137,10 @@ Interpretation categories:
 
 ## Phase 3 — Robustness and Sensitivity
 
-- Repeat key points with alternate split seed.
+- **GPT-Label Evaluation:** Evaluate the models trained with GPT labels against the entirety of the manual label dataset ($N=1191$) to establish a stable and precise asymptotic ceiling.
+- **Manual-Label Evaluation:** Implement $K$-Fold Cross-Validation across the entire manual dataset to generate a robust scaling curve, eliminating partition bias.
 - Repeat with one stronger backbone setting (if feasible).
-- Check whether conclusions about crossover are stable.
+- Check whether conclusions about crossover are stable under this asymmetric evaluation protocol.
 - **Per-Class Bottleneck Analysis:** Compare class-level metrics (Precision, Recall, F1) between the best expert-label model and the asymptotic GPT-label model to identify specific LLM weaknesses.
 
 ---
