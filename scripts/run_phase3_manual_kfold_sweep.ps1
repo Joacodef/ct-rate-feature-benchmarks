@@ -5,6 +5,7 @@ param(
     [string]$RunsRoot = "outputs/manual_kfold_budget",
     [string]$HydraJobName = "manual_kfold_budget",
     [int]$Seed = 52,
+    [int[]]$Seeds,
     [switch]$Force,
     [switch]$StopOnError,
     [switch]$SkipAggregate
@@ -26,11 +27,26 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $failureLog = Join-Path $logDir "kfold_failures_$timestamp.log"
 
+$seedList = @()
+if ($PSBoundParameters.ContainsKey("Seeds")) {
+    $seedList = $Seeds | Where-Object { $_ -ne $null } | ForEach-Object { [int]$_ }
+} else {
+    $seedList = @([int]$Seed)
+}
+
+if ($seedList.Count -eq 0) {
+    throw "No seeds provided. Use -Seed <int> or -Seeds <int,int,...>."
+}
+
+$seedList = $seedList | Sort-Object -Unique
+Write-Host "Running Phase 3 K-fold sweep with seeds: $($seedList -join ', ')"
+
 $rows = Import-Csv $ManifestIndexPath | Sort-Object @{Expression = {[int]$_.fold}}, @{Expression = {[int]$_.requested_budget}}
 
 function Invoke-Phase3Run {
     param(
-        [Parameter(Mandatory = $true)][pscustomobject]$Row
+        [Parameter(Mandatory = $true)][pscustomobject]$Row,
+        [Parameter(Mandatory = $true)][int]$RunSeed
     )
 
     $fold = [int]$Row.fold
@@ -47,7 +63,7 @@ function Invoke-Phase3Run {
     if (-not (Test-Path $resolvedVal)) { throw "Validation manifest not found: $resolvedVal" }
     if (-not (Test-Path $resolvedTest)) { throw "Test manifest not found: $resolvedTest" }
 
-    $runDir = Join-Path $RunsRoot ("f{0}_n{1}_s{2}" -f $fold, $budget, $Seed)
+    $runDir = Join-Path $RunsRoot ("f{0}_n{1}_s{2}" -f $fold, $budget, $RunSeed)
     $finalCheckpoint = Join-Path $runDir "checkpoints/final_model.pt"
 
     if ((-not $Force) -and (Test-Path $finalCheckpoint)) {
@@ -55,7 +71,7 @@ function Invoke-Phase3Run {
         return
     }
 
-    Write-Host "[RUN ] fold=$fold budget=$budget seed=$Seed -> $runDir"
+    Write-Host "[RUN ] fold=$fold budget=$budget seed=$RunSeed -> $runDir"
 
     $manifestRootHydra = $ManifestRoot.Replace('\\', '/')
     $runDirHydra = $runDir.Replace('\\', '/')
@@ -70,14 +86,14 @@ function Invoke-Phase3Run {
         "data.test_manifests=[$testManifest]",
         "hydra.job.name=$HydraJobName",
         "hydra.run.dir=$runDirHydra",
-        "utils.seed=$Seed"
+        "utils.seed=$RunSeed"
     )
 
     & python @args
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -ne 0) {
-        $message = "FAILED fold=$fold budget=$budget seed=$Seed train_manifest=$trainManifest val_manifest=$valManifest test_manifest=$testManifest exit_code=$exitCode"
+        $message = "FAILED fold=$fold budget=$budget seed=$RunSeed train_manifest=$trainManifest val_manifest=$valManifest test_manifest=$testManifest exit_code=$exitCode"
         Add-Content -Path $failureLog -Value $message
         Write-Host "[FAIL] $message"
 
@@ -88,8 +104,11 @@ function Invoke-Phase3Run {
 }
 
 try {
-    foreach ($row in $rows) {
-        Invoke-Phase3Run -Row $row
+    foreach ($currentSeed in $seedList) {
+        Write-Host "Starting sweep for seed=$currentSeed"
+        foreach ($row in $rows) {
+            Invoke-Phase3Run -Row $row -RunSeed $currentSeed
+        }
     }
 
     if (Test-Path $failureLog) {

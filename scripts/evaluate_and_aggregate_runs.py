@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf
@@ -53,6 +53,22 @@ def _parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional comma-separated test manifest names override.",
+    )
+    parser.add_argument(
+        "--budget-filter",
+        type=str,
+        default=None,
+        help="Optional comma-separated budget values to evaluate (e.g., 250,800,1191).",
+    )
+    parser.add_argument(
+        "--fold-map-csv",
+        type=str,
+        default=None,
+        help=(
+            "Optional CSV defining per-run manifest mapping. "
+            "Required column: 'manifest'. Optional match columns: "
+            "'run_dir', 'budget_n', 'split_seed', 'cv_fold'."
+        ),
     )
     parser.add_argument(
         "--source",
@@ -119,6 +135,31 @@ def _parse_test_manifests(raw: Optional[str]) -> Optional[List[str]]:
     return values or None
 
 
+def _parse_budget_filter(raw: Optional[str]) -> Optional[Set[int]]:
+    """Parse optional comma-separated budget integers.
+
+    Args:
+        raw: Raw CLI string.
+
+    Returns:
+        Set of budgets or ``None`` when not provided.
+    """
+    if not raw:
+        return None
+
+    values: Set[int] = set()
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            values.add(int(token))
+        except ValueError as exc:
+            raise ValueError(f"Invalid budget value in --budget-filter: '{token}'") from exc
+
+    return values or None
+
+
 def _discover_runs(runs_root: Path, checkpoint_name: str) -> List[Path]:
     """Discover run directories that contain config and checkpoint artifacts.
 
@@ -174,6 +215,165 @@ def _extract_budget_seed(train_manifest: Optional[str]) -> Dict[str, Optional[in
         payload["budget_n"] = int(match.group(1))
         payload["split_seed"] = int(match.group(2))
     return payload
+
+
+def _get_run_train_manifest(run_dir: Path) -> Optional[str]:
+    """Read ``data.train_manifest`` from a run Hydra config.
+
+    Args:
+        run_dir: Run directory path.
+
+    Returns:
+        Train manifest value or ``None`` when unavailable.
+    """
+    cfg_path = run_dir / ".hydra" / "config.yaml"
+    if not cfg_path.exists():
+        return None
+
+    try:
+        cfg = OmegaConf.load(cfg_path)
+    except Exception:
+        return None
+    return OmegaConf.select(cfg, "data.train_manifest", default=None)
+
+
+def _filter_runs_by_budget(run_dirs: List[Path], budget_filter: Optional[Set[int]]) -> List[Path]:
+    """Filter run directories by parsed budget values.
+
+    Args:
+        run_dirs: Discovered run directories.
+        budget_filter: Optional set of allowed budget integers.
+
+    Returns:
+        Filtered run directory list.
+    """
+    if not budget_filter:
+        return run_dirs
+
+    kept: List[Path] = []
+    skipped_without_budget = 0
+    for run_dir in run_dirs:
+        train_manifest = _get_run_train_manifest(run_dir)
+        budget_n = _extract_budget_seed(train_manifest).get("budget_n")
+        if budget_n is None:
+            skipped_without_budget += 1
+            continue
+        if budget_n in budget_filter:
+            kept.append(run_dir)
+
+    log.info(
+        "Budget filter kept %d/%d runs (requested budgets=%s).",
+        len(kept),
+        len(run_dirs),
+        sorted(budget_filter),
+    )
+    if skipped_without_budget:
+        log.warning(
+            "Skipped %d runs because budget could not be inferred from train_manifest.",
+            skipped_without_budget,
+        )
+    return kept
+
+
+def _load_fold_map_csv(path: Optional[str]) -> Optional[pd.DataFrame]:
+    """Load and validate optional per-run manifest mapping CSV.
+
+    Args:
+        path: CSV path.
+
+    Returns:
+        Dataframe or ``None`` if path is not provided.
+    """
+    if not path:
+        return None
+
+    fold_map_path = Path(path)
+    if not fold_map_path.exists():
+        raise FileNotFoundError(f"Fold map CSV not found: {fold_map_path}")
+
+    df = pd.read_csv(fold_map_path)
+    if "manifest" not in df.columns:
+        raise ValueError("Fold map CSV must include a 'manifest' column.")
+
+    selector_cols = ["run_dir", "budget_n", "split_seed", "cv_fold"]
+    if not any(col in df.columns for col in selector_cols):
+        raise ValueError(
+            "Fold map CSV must include at least one selector column: "
+            "run_dir, budget_n, split_seed, cv_fold."
+        )
+
+    # Normalize selector dtypes where possible.
+    for col in ("budget_n", "split_seed", "cv_fold"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if "run_dir" in df.columns:
+        df["run_dir"] = df["run_dir"].astype(str)
+
+    df["manifest"] = df["manifest"].astype(str)
+    return df
+
+
+def _norm_path_for_match(raw: str) -> str:
+    """Normalize path strings for robust cross-platform matching."""
+    return raw.replace("\\", "/").rstrip("/").lower()
+
+
+def _resolve_manifests_for_run(
+    fold_map_df: Optional[pd.DataFrame],
+    run_dir: Path,
+    parsed: Dict[str, Optional[int]],
+    fallback_test_manifests: Optional[List[str]],
+) -> Optional[List[str]]:
+    """Resolve test manifests for one run using optional fold-map rules.
+
+    Args:
+        fold_map_df: Optional fold map dataframe.
+        run_dir: Run directory path.
+        parsed: Parsed metadata from train manifest.
+        fallback_test_manifests: Global test manifests fallback.
+
+    Returns:
+        Ordered list of manifest names or ``None``.
+    """
+    if fold_map_df is None:
+        return fallback_test_manifests
+
+    run_norm = _norm_path_for_match(str(run_dir))
+
+    def row_matches(row: pd.Series) -> bool:
+        if "run_dir" in row.index and pd.notna(row["run_dir"]):
+            wanted = _norm_path_for_match(str(row["run_dir"]))
+            if not (run_norm == wanted or run_norm.endswith(wanted)):
+                return False
+
+        for col in ("budget_n", "split_seed", "cv_fold"):
+            if col in row.index and pd.notna(row[col]):
+                if parsed.get(col) is None:
+                    return False
+                if int(row[col]) != int(parsed[col]):
+                    return False
+        return True
+
+    selected = fold_map_df[fold_map_df.apply(row_matches, axis=1)]
+    if selected.empty:
+        if fallback_test_manifests is not None:
+            log.warning(
+                "No fold-map match for run %s (budget=%s, seed=%s, fold=%s); using --test-manifests fallback.",
+                run_dir,
+                parsed.get("budget_n"),
+                parsed.get("split_seed"),
+                parsed.get("cv_fold"),
+            )
+            return fallback_test_manifests
+        raise ValueError(
+            "No fold-map match for run "
+            f"{run_dir} (budget={parsed.get('budget_n')}, seed={parsed.get('split_seed')}, fold={parsed.get('cv_fold')})."
+        )
+
+    manifests = [m for m in selected["manifest"].tolist() if m and str(m).strip()]
+    ordered_unique = list(dict.fromkeys(manifests))
+    return ordered_unique or fallback_test_manifests
 
 
 def _add_primary_test_metrics(df: pd.DataFrame) -> pd.DataFrame:
@@ -337,6 +537,7 @@ def _evaluate_one_run(
     test_manifest_dir: Path,
     checkpoint_name: str,
     test_manifests: Optional[List[str]],
+    fold_map_df: Optional[pd.DataFrame],
     source: str,
     eval_subdir: str,
 ) -> Dict[str, Any]:
@@ -364,21 +565,27 @@ def _evaluate_one_run(
     _ensure_run_has_metrics_artifacts(run_dir)
 
     cfg = OmegaConf.load(cfg_path)
+    train_manifest = OmegaConf.select(cfg, "data.train_manifest", default=None)
+    parsed = _extract_budget_seed(train_manifest)
+    resolved_test_manifests = _resolve_manifests_for_run(
+        fold_map_df=fold_map_df,
+        run_dir=run_dir,
+        parsed=parsed,
+        fallback_test_manifests=test_manifests,
+    )
     cfg = _configure_eval_cfg(
         cfg=cfg,
         run_dir=run_dir,
         checkpoint_path=checkpoint_path,
         test_manifest_dir=test_manifest_dir,
-        test_manifests=test_manifests,
+        test_manifests=resolved_test_manifests,
         eval_subdir=eval_subdir,
     )
 
     test_metrics = evaluate_model(cfg)
     val_metrics = _load_latest_run_metrics(run_dir)
 
-    train_manifest = OmegaConf.select(cfg, "data.train_manifest", default=None)
     val_manifest = OmegaConf.select(cfg, "data.val_manifest", default=None)
-    parsed = _extract_budget_seed(train_manifest)
 
     row: Dict[str, Any] = {
         "source": source,
@@ -493,8 +700,11 @@ def main() -> None:
 
     source = args.source or _infer_source(runs_root)
     test_manifests = _parse_test_manifests(args.test_manifests)
+    budget_filter = _parse_budget_filter(args.budget_filter)
+    fold_map_df = _load_fold_map_csv(args.fold_map_csv)
 
     run_dirs = _discover_runs(runs_root, checkpoint_name=args.checkpoint_name)
+    run_dirs = _filter_runs_by_budget(run_dirs, budget_filter)
     if not run_dirs:
         raise RuntimeError(
             f"No runs with checkpoints found under {runs_root} using checkpoint name '{args.checkpoint_name}'."
@@ -510,6 +720,7 @@ def main() -> None:
             test_manifest_dir=test_manifest_dir,
             checkpoint_name=args.checkpoint_name,
             test_manifests=test_manifests,
+            fold_map_df=fold_map_df,
             source=source,
             eval_subdir=args.eval_subdir,
         )
