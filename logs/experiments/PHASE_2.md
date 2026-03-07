@@ -1,5 +1,11 @@
 # Phase 2 — Scaling Law Study (Core Objective)
 
+## Scope Note (Protocol Interpretation)
+
+- Phase 2 is an exploratory fixed-split scaling study, not the final confirmatory comparison.
+- All conclusions in this file are conditional on the Phase 2 evaluation protocol and endpoint.
+- Final cross-source claims should be anchored in Phase 3 (fold + seed aggregation with statistical inference).
+
 ## Item 0: Generate Budget Manifests
 - **Status:** completed
 - **Goal:** Create reproducible training subsets for both label sources across seeds.
@@ -41,7 +47,7 @@ python .\scripts\generate_budget_manifests.py --train-manifest-path data\manifes
 * **Command Pattern (Inside a loop):**
 
 ```powershell
-python -m src.classification.train --config-name best_manual_labels_config.yaml data.auto_split.enabled=false data.train_manifest=manual_budget_splits/test_manual_train_n<BUDGET>_s<SEED>.csv data.val_manifest=manual_budget_splits/test_manual_train_n<BUDGET>_s<SEED>_val.csv hydra.job.name=manual_budget hydra.run.dir=outputs/manual_budget/train_n<BUDGET>_s<SEED>
+python -m src.classification.train --config-name best_manual_labels_config.yaml data.auto_split.enabled=false data.train_manifest=manual_budget_splits/train_n<BUDGET>_s<SEED>.csv data.val_manifest=manual_budget_splits/train_n<BUDGET>_s<SEED>_val.csv hydra.job.name=manual_budget hydra.run.dir=outputs/manual_budget/train_n<BUDGET>_s<SEED>
 
 ```
 
@@ -50,7 +56,7 @@ python -m src.classification.train --config-name best_manual_labels_config.yaml 
 * **Command Pattern (Inside a loop):**
 
 ```powershell
-python -m src.classification.train --config-name best_gpt_labels_config.yaml data.auto_split.enabled=false data.train_manifest=gpt_budget_splits/train_n<BUDGET>_s<SEED>.csv data.val_manifest=gpt_budget_splits/train_n<BUDGET>_s<SEED>_val.csv hydra.job.name=gpt_budget hydra.run.dir=outputs/gpt_budget/train_n<BUDGET>_s<SEED>
+python -m src.classification.train --config-name best_gpt_labels_config.yaml data.auto_split.enabled=false data.train_manifest=gpt_budget_splits/all_n<BUDGET>_s<SEED>.csv data.val_manifest=gpt_budget_splits/all_n<BUDGET>_s<SEED>_val.csv hydra.job.name=gpt_budget hydra.run.dir=outputs/gpt_budget/train_n<BUDGET>_s<SEED>
 
 ```
 
@@ -64,7 +70,7 @@ python -m src.classification.train --config-name best_gpt_labels_config.yaml dat
 * **Command:**
 
 ```powershell
-python .\scripts\evaluate_and_aggregate_runs.py --runs-root .\outputs\manual_budget --test-manifest-dir .\data\manifests\manual\ --source manual --output-prefix manual_labels
+python .\scripts\evaluate_and_aggregate_runs.py --runs-root .\outputs\manual_budget --test-manifest-dir .\data\manifests\manual\ --test-manifests FINAL_TEST.csv --source manual --output-prefix manual_labels
 
 ```
 
@@ -85,7 +91,7 @@ python .\scripts\evaluate_and_aggregate_runs.py --runs-root .\outputs\manual_bud
 * **Command:**
 
 ```powershell
-python .\scripts\evaluate_and_aggregate_runs.py --runs-root .\outputs\gpt_budget --test-manifest-dir .\data\manifests\manual\ --source gpt --output-prefix gpt_labels
+python .\scripts\evaluate_and_aggregate_runs.py --runs-root .\outputs\gpt_budget --test-manifest-dir .\data\manifests\manual\ --test-manifests FINAL_TEST.csv --source gpt --output-prefix gpt_labels
 ```
 
 #### Aggregated Results (GPT Labels)
@@ -113,4 +119,5 @@ Under the fixed-split, multi-seed scaling protocol used in this phase, expert-an
 * **Asymptotic Ceiling:** The model trained on GPT labels reaches its performance ceiling at approximately 46,000+ samples, achieving a maximum F1-macro of $\sim 0.5746$ and an AUPRC of $\sim 0.5669$.
 * **Crossover Point:** The performance curve for manual labels surpasses the asymptotic ceiling of GPT labels at an exceptionally low budget. With only $n=250$ expert-annotated samples, the model achieves an F1-macro of $0.5900$ and an AUPRC of $0.5987$, outperforming the massive GPT budget. The performance continues to scale to an F1-macro of $0.6280$ at $n=1191$.
 * **Variance and Stability:** The evaluation exhibits increasing standard deviation at higher budgets, culminating in significant variance at $n=1191$ (e.g., AUPRC $\pm 0.0944$). Since these results are calculated over a fixed, relatively small final test set (258 samples), this variance does not stem from different test data, but rather reflects the model's high sensitivity to the random seeds. Random variations in weight initialization and the composition of the training/validation splits cause the model to converge to slightly different decision boundaries. When these boundaries are applied to the fixed 258-sample test set, particularly using macro-averaged metrics, minor shifts in the classification of underrepresented findings result in massive swings in the final aggregated scores.
-* **Final Verdict (Phase-2 protocol):** The hypothesis that massive GPT-label training can surpass few-shot expert-label training is rejected for this fixed-split setup. Within this protocol, manual labels are more sample-efficient and reach a higher observed ceiling. Phase 3 is used to test the robustness of this conclusion under fold-based evaluation.
+* **Cross-phase reconciliation:** The Phase 1 linear-probe control also preserved manual > GPT under a fixed test endpoint, indicating head nonlinearity is not the main confounder in this protocol. However, Phase 3 uses a broader fold-based endpoint and inferential statistics, and should be treated as the final basis for cross-source claims.
+* **Final Verdict (Phase-2 protocol):** Within this fixed-split setup, manual labels are more sample-efficient and reach a higher observed ceiling. This is a protocol-conditional result; robustness and final comparative inference are deferred to Phase 3.

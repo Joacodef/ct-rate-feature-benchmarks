@@ -1,7 +1,7 @@
 # Phase 3 - Robustness and Sensitivity Plan
 
 ## Main Objective
-Establish a conclusive, protocol-symmetric comparison between manual and GPT labels by controlling both data-partition variance (K-fold) and optimization variance (multiple seeds).
+Establish a conclusive comparison between manual and GPT labels on shared budgets with a protocol-symmetric setup, while also characterizing GPT-only higher-budget regimes, by controlling both data-partition variance (K-fold) and optimization variance (multiple seeds).
 
 ## Core Design
 - Primary protocol: 5-fold cross-validation for both label sources.
@@ -84,6 +84,8 @@ Establish a conclusive, protocol-symmetric comparison between manual and GPT lab
 - Compute policy:
   - Initial target remains 5 folds x 5 seeds.
   - Increase seeds selectively only where inference is inconclusive.
+- Canonical summary artifact:
+  - `outputs/aggregated_results/phase3_manual_vs_gpt_summary.csv`
 
 ## Acceptance Criteria
 - Both sources use identical fold count and seed list.

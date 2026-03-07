@@ -31,7 +31,7 @@ Hypothesis: frozen visual embeddings are not sufficiently task-separable for dow
 Signals:
 - Low ceiling across all classifier heads/hyperparameters.
 - Small gains from MLP capacity changes.
-- Stronger gains when using richer features or partial fine-tuning.
+- Stronger gains only when changing to a different precomputed feature set (outside this repository's training code path).
 
 ### B. Label bottleneck (quality/noise)
 Hypothesis: GPT labels introduce noise or calibration drift relative to expert labels.
@@ -81,6 +81,11 @@ Signals:
 
 ## 5) Phase Plan
 
+Constraint note:
+- This repository trains heads on frozen, precomputed features only.
+- Partial backbone unfreezing/fine-tuning is out of scope here.
+- Larger-MLP capacity stress testing is covered by Phase 0 HPO and is not duplicated as a separate required item.
+
 ## Phase 0 — Hyperparameter Optimization and Protocol Selection
 
 Goal:
@@ -102,6 +107,26 @@ Acceptance:
 
 Interpretation:
 - Large F1 jump with little AUPRC change => operating-point bottleneck.
+
+### Item 2 — Linear Probe Representation Check
+- Train a strict linear probe (single linear layer on frozen CT-CLIP features) using the same data protocol and seeds.
+- Keep all training/evaluation settings fixed relative to the selected Phase 0 protocol, changing only head capacity.
+- Compare against the tuned nonlinear MLP on matched budgets.
+
+Recommended matrix:
+- Sources: manual and GPT labels.
+- Budgets: 100, 500, 1191 (shared budgets for direct source comparison).
+- Seeds: same Phase 2/3 seed subset (minimum 3; preferred 5).
+- Metrics: macro/micro AUPRC, AUROC, and threshold-tuned F1.
+
+Interpretation:
+- Small MLP vs linear-probe gap => representation likely near linear-separable; feature bottleneck more plausible.
+- Large MLP vs linear-probe gap => head capacity contributes materially; pure representation bottleneck is less dominant.
+- If GPT-vs-manual ranking flips between heads, classify bottleneck impact as high and revisit core claims.
+
+Phase placement decision:
+- Canonical placement: Phase 1 (model-side bottleneck checks), because it is a capacity-control diagnostic.
+- Optional mini-check in late Phase 0: 1-2 pilot runs can be used for early triage, but do not replace the full Phase 1 diagnostic.
 
 ### Note on Label Quality and Distribution Checks
 - Label quality (agreement, error analysis, manual audit) and distribution checks (prevalence, subgroup analysis) are performed in the data/label-generation repository, not here. Summaries or references to those analyses may be included as needed.
@@ -139,7 +164,7 @@ Interpretation categories:
 
 - **GPT-Label Evaluation:** Evaluate the models trained with GPT labels against the entirety of the manual label dataset ($N=1191$) to establish a stable and precise asymptotic ceiling.
 - **Manual-Label Evaluation:** Implement $K$-Fold Cross-Validation across the entire manual dataset to generate a robust scaling curve, eliminating partition bias.
-- Repeat with one stronger backbone setting (if feasible).
+- Optional external follow-up (out of scope for this repo): repeat under a different precomputed feature family and compare whether crossover conclusions persist.
 - Check whether conclusions about crossover are stable under this asymmetric evaluation protocol.
 - **Per-Class Bottleneck Analysis:** Compare class-level metrics (Precision, Recall, F1) between the best expert-label model and the asymptotic GPT-label model to identify specific LLM weaknesses.
 
@@ -163,8 +188,8 @@ Action:
 1. Baseline GPT vs expert (frozen features, MLP, same protocol, 3 seeds).
 2. Threshold-tuned F1 evaluation (per-label thresholds).
 3. Label-budget curves at 5 budget points per source.
-4. One representation stress test (e.g., linear probe or partial unfreeze).
-5. One representation stress test (e.g., larger MLP or partial unfreeze).
+4. One representation stress test (linear probe on frozen features).
+5. One protocol-sensitivity stress test (fixed-test endpoint vs fold-holdout endpoint comparison).
 6. Crossover estimate + uncertainty.
 7. Per-class performance breakdown comparing the optimal expert model vs. the asymptotic GPT model.
 
@@ -177,7 +202,7 @@ This MVP is sufficient to answer the main question with defensible evidence.
 For each experiment:
 - Dataset source: GPT or expert
 - Label budget: N
-- Model setup: frozen/partial-ft, head type
+- Model setup: frozen features, head type
 - Metrics: macro/micro AUPRC, AUROC, F1
 - Threshold policy: fixed 0.5 or tuned
 - Seeds: mean ± std

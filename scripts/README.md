@@ -189,6 +189,48 @@ Options:
 * Seed precedence: `-Seeds` (list) > `-Seed` (single) > built-in default five seeds.
 * Any default can still be overridden explicitly, e.g. `-ManifestRoot` or `-ConfigName`.
 
+## run_phase1_linear_probe_sweep.ps1
+
+Runs the Phase 1 linear-probe diagnostic sweep over matched budgets and seeds.
+
+* Trains with `model=linear_probe` for strict single-layer probing on frozen features.
+* Supports `-Source both|manual|gpt`.
+* Uses shared defaults from the study plan:
+	* Budgets: `100,500,1191`
+	* Seeds: `42,123,456,789,999`
+* Aggregation defaults to `--test-manifest-dir data/manifests/manual --test-manifests FINAL_TEST.csv`.
+* Writes runs to:
+	* `outputs/manual_budget_linear_probe`
+	* `outputs/gpt_budget_linear_probe`
+* By default runs `evaluate_and_aggregate_runs.py` at the end for each selected source.
+
+Run both sources:
+
+```powershell
+.\scripts\run_phase1_linear_probe_sweep.ps1 -Source both -StopOnError
+
+```
+
+Run only manual source with custom budgets and skip aggregation:
+
+```powershell
+.\scripts\run_phase1_linear_probe_sweep.ps1 -Source manual -Budgets 100,250,500 -Seeds 42,123,456 -SkipAggregate
+
+```
+
+Run with an explicit test-manifest set:
+
+```powershell
+.\scripts\run_phase1_linear_probe_sweep.ps1 -Source both -TestManifestDir data/manifests/manual -TestManifests FINAL_TEST.csv
+
+```
+
+Options:
+
+* `-Force`: retrain completed runs.
+* `-StopOnError`: stop immediately on first failed run.
+* `-SkipAggregate`: skip final aggregate evaluation.
+
 ## evaluate_and_aggregate_runs.py
 
 Evaluates many trained run folders on test manifests and aggregates results to CSV.
