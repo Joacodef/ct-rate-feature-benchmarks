@@ -11,7 +11,7 @@ import glob
 import json
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -56,6 +56,12 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Optional markdown report output path.",
     )
+    parser.add_argument(
+        "--budgets",
+        type=str,
+        default=None,
+        help="Optional comma-separated budgets to include (e.g., 250,800,1191,1520).",
+    )
     return parser.parse_args()
 
 
@@ -75,12 +81,34 @@ def _extract_fold(manifest_name: str, file_path: Path) -> Optional[int]:
     return None
 
 
+def _extract_budget_seed(manifest_name: str, file_path: Path) -> Tuple[Optional[int], Optional[int]]:
+    candidates = [manifest_name, file_path.name, str(file_path)]
+    for value in candidates:
+        match = re.search(r"_n(\d+)_s(\d+)", value)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None, None
+
+
+def _parse_int_list(raw: Optional[str]) -> Optional[List[int]]:
+    if raw is None:
+        return None
+    values: List[int] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        values.append(int(token))
+    return values or None
+
+
 def _load_rows(paths: Iterable[Path], source_label: str) -> List[dict]:
     rows: List[dict] = []
     for path in paths:
         payload = json.loads(path.read_text(encoding="utf-8"))
         manifest_name = str(payload.get("manifest", ""))
         fold = _extract_fold(manifest_name, path)
+        budget_n, split_seed = _extract_budget_seed(manifest_name, path)
         per_class = payload.get("per_class", {})
         if not isinstance(per_class, dict):
             continue
@@ -94,6 +122,8 @@ def _load_rows(paths: Iterable[Path], source_label: str) -> List[dict]:
                     "file_path": str(path).replace("\\", "/"),
                     "manifest": manifest_name,
                     "fold": fold,
+                    "budget_n": budget_n,
+                    "split_seed": split_seed,
                     "class_name": str(class_name),
                     "precision": float(metrics.get("precision", 0.0)),
                     "recall": float(metrics.get("recall", 0.0)),
@@ -105,7 +135,7 @@ def _load_rows(paths: Iterable[Path], source_label: str) -> List[dict]:
 
 
 def _paired_comparison(manual_df: pd.DataFrame, gpt_df: pd.DataFrame) -> pd.DataFrame:
-    key_cols = ["fold", "class_name"]
+    key_cols = ["fold", "budget_n", "split_seed", "class_name"]
 
     left = manual_df.rename(
         columns={
@@ -131,18 +161,18 @@ def _paired_comparison(manual_df: pd.DataFrame, gpt_df: pd.DataFrame) -> pd.Data
     merged = left.merge(right, on=key_cols, how="inner")
     if merged.empty:
         raise RuntimeError(
-            "No fold/class overlap found between manual and GPT detailed metric files."
+            "No fold/budget/seed/class overlap found between manual and GPT detailed metric files."
         )
 
     merged["delta_precision"] = merged["manual_precision"] - merged["gpt_precision"]
     merged["delta_recall"] = merged["manual_recall"] - merged["gpt_recall"]
     merged["delta_f1"] = merged["manual_f1"] - merged["gpt_f1"]
-    return merged.sort_values(["class_name", "fold"])
+    return merged.sort_values(["budget_n", "class_name", "fold", "split_seed"])
 
 
 def _summary_table(paired_df: pd.DataFrame) -> pd.DataFrame:
     grouped = (
-        paired_df.groupby("class_name", dropna=False)[
+        paired_df.groupby(["budget_n", "class_name"], dropna=False)[
             [
                 "manual_precision",
                 "manual_recall",
@@ -169,13 +199,17 @@ def _summary_table(paired_df: pd.DataFrame) -> pd.DataFrame:
     if "class_name_" in grouped.columns:
         grouped = grouped.rename(columns={"class_name_": "class_name"})
 
-    return grouped.sort_values("delta_f1_mean", ascending=False)
+    if "budget_n_" in grouped.columns:
+        grouped = grouped.rename(columns={"budget_n_": "budget_n"})
+
+    return grouped.sort_values(["budget_n", "delta_f1_mean"], ascending=[True, False])
 
 
 def _write_markdown(summary_df: pd.DataFrame, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     display_cols = [
+        "budget_n",
         "class_name",
         "manual_f1_mean",
         "manual_f1_std",
@@ -192,13 +226,14 @@ def _write_markdown(summary_df: pd.DataFrame, output_path: Path) -> None:
         "",
         "Positive deltas mean manual > GPT (potential GPT bottleneck).",
         "",
-        "| Class | Manual F1 mean | Manual F1 std | GPT F1 mean | GPT F1 std | Delta F1 mean | Delta F1 std | Delta Recall mean | Delta Precision mean |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Budget | Class | Manual F1 mean | Manual F1 std | GPT F1 mean | GPT F1 std | Delta F1 mean | Delta F1 std | Delta Recall mean | Delta Precision mean |",
+        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
 
     for _, row in summary_df[display_cols].iterrows():
         lines.append(
-            "| {class_name} | {manual_f1_mean:.4f} | {manual_f1_std:.4f} | {gpt_f1_mean:.4f} | {gpt_f1_std:.4f} | {delta_f1_mean:.4f} | {delta_f1_std:.4f} | {delta_recall_mean:.4f} | {delta_precision_mean:.4f} |".format(
+            "| {budget_n} | {class_name} | {manual_f1_mean:.4f} | {manual_f1_std:.4f} | {gpt_f1_mean:.4f} | {gpt_f1_std:.4f} | {delta_f1_mean:.4f} | {delta_f1_std:.4f} | {delta_recall_mean:.4f} | {delta_precision_mean:.4f} |".format(
+                budget_n=int(row["budget_n"]),
                 class_name=row["class_name"],
                 manual_f1_mean=float(row["manual_f1_mean"]),
                 manual_f1_std=float(row["manual_f1_std"]),
@@ -216,6 +251,7 @@ def _write_markdown(summary_df: pd.DataFrame, output_path: Path) -> None:
 
 def main() -> None:
     args = _parse_args()
+    budgets_filter = _parse_int_list(args.budgets)
 
     manual_paths = _expand_glob(args.manual_glob)
     gpt_paths = _expand_glob(args.gpt_glob)
@@ -237,8 +273,32 @@ def main() -> None:
             "Expected names like *_f1_test*."
         )
 
+    if manual_df["budget_n"].isna().any() or gpt_df["budget_n"].isna().any():
+        raise ValueError(
+            "Could not extract budget IDs from one or more files. "
+            "Expected names or paths containing _n{budget}_s{seed}."
+        )
+
+    if manual_df["split_seed"].isna().any() or gpt_df["split_seed"].isna().any():
+        raise ValueError(
+            "Could not extract seed IDs from one or more files. "
+            "Expected names or paths containing _n{budget}_s{seed}."
+        )
+
     manual_df["fold"] = manual_df["fold"].astype(int)
     gpt_df["fold"] = gpt_df["fold"].astype(int)
+    manual_df["budget_n"] = manual_df["budget_n"].astype(int)
+    gpt_df["budget_n"] = gpt_df["budget_n"].astype(int)
+    manual_df["split_seed"] = manual_df["split_seed"].astype(int)
+    gpt_df["split_seed"] = gpt_df["split_seed"].astype(int)
+
+    if budgets_filter is not None:
+        manual_df = manual_df[manual_df["budget_n"].isin(budgets_filter)].copy()
+        gpt_df = gpt_df[gpt_df["budget_n"].isin(budgets_filter)].copy()
+        if manual_df.empty or gpt_df.empty:
+            raise RuntimeError(
+                "No rows remain after applying --budgets filter."
+            )
 
     paired_df = _paired_comparison(manual_df, gpt_df)
     summary_df = _summary_table(paired_df)
