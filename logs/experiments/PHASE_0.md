@@ -74,11 +74,12 @@ python .\scripts\optuna_mlp_search.py --config-name .\configs\optuna_gpt_labels_
 
 To ensure the robustness of the best hyperparameters discovered during the Optuna search, an evaluation protocol is executed over multiple independent seeds.
 
-* **Script:** `evaluate_stability.ps1`
+* **Seed Loop Pattern:** retrain best-config model once per seed with explicit overrides for `utils.seed=<seed>` and `data.auto_split.seed=<seed>`
 * **Seeds Evaluated:** $42, 123, 456, 789, 999$
-* **Output Directory:** `outputs\optuna_manual_labels_studies\best_model_evaluation`
+* **GPT Stability Artifacts:** `outputs\optuna_gpt_labels_studies\best_model_evaluation\best_model_seed_<SEED>\...`
+* **Manual Stability Artifacts (redo run used downstream):** `outputs\optuna_manual_labels_studies\best_model_evaluation_redo\s<SEED>`
 
-The execution overrides the base configuration with the identified best hyperparameters and dynamically assigns the seed for both the utility modules and data splitting mechanisms to evaluate stability across distinct initializations and data splits.
+The execution fixes the best Optuna hyperparameters and repeats training over the five-seed set above. Each run is then evaluated on the configured test manifests, and reported Phase 0 baseline values are the mean and standard deviation across these five runs (count = 5).
 
 ### Aggregated Results (Manual Labels Test Set)
 
@@ -105,3 +106,5 @@ The hyperparameter optimization successfully identified robust configurations fo
 * **Interpretation (Phase-0 protocol):** Under this initial split-and-seed evaluation, the manual pipeline improves average performance substantially, while indicating higher sensitivity to initialization/split randomness.
 
 These hyperparameters establish the optimized baselines for the subsequent feature evaluation phases.
+
+> Note: Phase 1 later re-evaluates these checkpoints with per-label threshold optimization on `FINAL_TEST.csv` using the same five seeds and reports aggregated mean/std in `logs/experiments/PHASE_1.md`.

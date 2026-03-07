@@ -4,6 +4,12 @@
 - **Status:** completed
 - **Goal:** Tune per-label thresholds for F1 on the validation set and recompute the test F1 using those frozen thresholds.
 
+### Checkpoint Provenance (from Phase 0 Stability Protocol)
+- The checkpoints used here were not one-off trainings; they came from the Phase 0 stability sweep over seeds `42, 123, 456, 789, 999`.
+- In that protocol, best Optuna hyperparameters were fixed and each seed was retrained with `utils.seed=<seed>` (and seed-specific split behavior where enabled).
+- Phase 1 threshold tuning was run on one representative stability run (`seed=123`) per source.
+- The "Phase 0 Baseline" values referenced below are the seed-aggregated means reported in `logs/experiments/PHASE_0.md`, not the metrics of a single run directory.
+
 ### Manual Labels Checkpoint
 - **Command:**
 ```powershell
@@ -14,7 +20,7 @@ python .\scripts\optimize_thresholds.py --run-dir outputs/optuna_manual_labels_s
 * **Results:**
 * Validation F1-Macro (Optimized): $0.6325$
 * Test F1-Macro (Frozen Thresholds on `FINAL_TEST.csv`): $0.5785$
-* Phase 0 Baseline Test F1-Macro: $\sim 0.6107$
+* Phase 0 Baseline Test F1-Macro (5-seed mean): $\sim 0.6107$
 
 ### GPT Labels Checkpoint
 
@@ -27,14 +33,31 @@ python .\scripts\optimize_thresholds.py --run-dir .\outputs\optuna_gpt_labels_st
 
 * **Results:**
 * Validation F1-Macro (Optimized): $0.5832$
-* Test F1-Macro (Frozen Thresholds on `test_manual_valid.csv`): $0.5576$
-* Phase 0 Baseline Test F1-Macro: $\sim 0.5237$
+* Test F1-Macro (Frozen Thresholds on `FINAL_TEST.csv`): $0.5963$
+* Phase 0 Baseline Test F1-Macro (5-seed mean): $\sim 0.5237$
+
+### Five-Seed Recalculation on `FINAL_TEST.csv`
+
+- **Execution:**
+
+```powershell
+.\scripts\run_phase1_threshold_sweep.ps1 -Source both -Force -StopOnError
+```
+
+- **Aggregation artifacts:**
+	- `outputs/aggregated_results/phase1_threshold_optimized_per_seed_all_metrics.csv`
+	- `outputs/aggregated_results/phase1_threshold_optimized_summary_all_metrics.csv`
+
+| Source | AUPRC (Mean +- Std) | AUROC (Mean +- Std) | F1-macro optimized (Mean +- Std) | Seeds |
+| --- | --- | --- | --- | --- |
+| Manual | 0.6550 +- 0.0991 | 0.7746 +- 0.0652 | 0.6181 +- 0.0538 | 5 |
+| GPT | 0.5751 +- 0.0090 | 0.7157 +- 0.0044 | 0.5934 +- 0.0061 | 5 |
 
 ## Phase 1 Conclusion
 
-The threshold optimization process successfully maximized F1-macro on the validation sets for both models. However, when these optimized decision boundaries were applied to the held-out test sets, the performance gains evaporated (a drop for the manual model from $\sim 0.6107$ to $0.5785$, and a marginal $\sim+0.03$ increase for the GPT model).
+Threshold optimization successfully maximized validation F1 and produced mixed test-set effects. Under the five-seed `FINAL_TEST.csv` recalculation, manual labels show a small F1 gain over the Phase 0 baseline ($0.6107 \rightarrow 0.6181$), while GPT shows a larger gain ($0.5237 \rightarrow 0.5934$).
 
-Because we do not observe the large and consistent test-set F1 improvement required to classify optimization as the dominant bottleneck (and instead observe validation overfitting on the manual labels), **Hypothesis D (Optimization/threshold bottleneck)** is not supported as the primary explanation under this protocol. The results are more consistent with **Hypothesis A (Representation bottleneck)** in the frozen-feature setting. We proceed to the scaling study (Phase 2) under the assumption that feature representation quality is the main limiting factor.
+Because improvements are not uniform across sources and manual-vs-GPT ranking remains unchanged after threshold tuning, optimization is likely a contributing factor but not a full explanation of the source gap. The evidence remains more consistent with **Hypothesis A (Representation bottleneck)** as the primary limiting factor in the frozen-feature setting.
 
 ## Item 2: Linear Probe Representation Check
 - **Status:** completed

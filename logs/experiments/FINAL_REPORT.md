@@ -31,6 +31,16 @@ Linear probe (single linear head, frozen features) was used as a head-capacity c
 
 This supports the interpretation that protocol/endpoint effects and label-feature alignment are stronger drivers of cross-source conclusions than hidden-layer capacity alone.
 
+Additional Phase 1 threshold check (5 seeds, `FINAL_TEST.csv`):
+
+- Source: `outputs/aggregated_results/phase1_threshold_optimized_summary_all_metrics.csv`
+- Manual: AUPRC $0.6550 \pm 0.0991$, AUROC $0.7746 \pm 0.0652$, F1-macro-optimized $0.6181 \pm 0.0538$
+- GPT: AUPRC $0.5751 \pm 0.0090$, AUROC $0.7157 \pm 0.0044$, F1-macro-optimized $0.5934 \pm 0.0061$
+
+Interpretation:
+
+- Threshold tuning improves absolute test F1 for both sources under this fixed endpoint (larger gain for GPT), while preserving manual > GPT ordering in the fixed-endpoint setting.
+
 ## 4) Crossover and Uncertainty (Phase 3 Canonical)
 
 Source for all inferential values:
@@ -99,9 +109,9 @@ Impact categories follow the study plan decision framework.
 - Evidence: absolute ceilings remain moderate even at high budgets (AUPRC ~0.57, AUROC ~0.73), indicating frozen-feature limits.
 - Effect: constrains both sources; does not alone determine GPT-vs-manual ranking.
 
-4. **Optimization/threshold bottleneck (D): Low impact (primary conclusion)**
-- Evidence: threshold tuning did not provide consistent test-set gains sufficient to explain source ranking.
-- Effect: limited for headline cross-source claim.
+4. **Optimization/threshold bottleneck (D): Low-to-Medium impact (not primary)**
+- Evidence: under five-seed `FINAL_TEST.csv` recalculation, threshold tuning improves absolute test metrics (especially GPT F1), but does not overturn fixed-endpoint source ordering and does not reconcile fixed-endpoint vs fold-holdout protocol divergence.
+- Effect: relevant for calibration-dependent absolute performance; limited for the headline cross-source claim anchored to Phase 3 paired inference.
 
 5. **Head capacity bottleneck (E): Low-to-Medium impact for ranking**
 - Evidence: linear-probe control preserved fixed-endpoint ranking; larger-MLP variation already explored in HPO.
