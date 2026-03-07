@@ -292,6 +292,22 @@ def _load_fold_map_csv(path: Optional[str]) -> Optional[pd.DataFrame]:
         raise FileNotFoundError(f"Fold map CSV not found: {fold_map_path}")
 
     df = pd.read_csv(fold_map_path)
+
+    # Allow passing manifest_index.csv directly by normalizing common aliases.
+    alias_map = {
+        "test_manifest": "manifest",
+        "requested_budget": "budget_n",
+        "seed": "split_seed",
+        "fold": "cv_fold",
+    }
+    rename_payload = {
+        src: dst
+        for src, dst in alias_map.items()
+        if src in df.columns and dst not in df.columns
+    }
+    if rename_payload:
+        df = df.rename(columns=rename_payload)
+
     if "manifest" not in df.columns:
         raise ValueError("Fold map CSV must include a 'manifest' column.")
 

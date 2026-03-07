@@ -1,10 +1,15 @@
 param(
-    [string]$ConfigName = "best_manual_labels_config.yaml",
-    [string]$ManifestRoot = "data/manifests/manual/manual_kfold_budget_splits",
-    [string]$ManifestIndexPath = "data/manifests/manual/manual_kfold_budget_splits/manifest_index.csv",
-    [string]$RunsRoot = "outputs/manual_kfold_budget",
-    [string]$HydraJobName = "manual_kfold_budget",
-    [int]$Seed = 52,
+    [ValidateSet("manual", "gpt")]
+    [string]$LabelSource = "manual",
+    [string]$ConfigName,
+    [string]$ManifestRoot,
+    [string]$TestManifestRoot,
+    [string]$ManifestIndexPath,
+    [string]$RunsRoot,
+    [string]$HydraJobName,
+    [string]$AggregateSource,
+    [string]$AggregateOutputPrefix,
+    [int]$Seed,
     [int[]]$Seeds,
     [switch]$Force,
     [switch]$StopOnError,
@@ -12,6 +17,39 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$sourceDefaults = @{
+    manual = @{
+        ConfigName = "best_manual_labels_config.yaml"
+        ManifestRoot = "data/manifests/manual/manual_kfold_budget_splits"
+        TestManifestRoot = "data/manifests/manual/manual_kfold_budget_splits"
+        ManifestIndexPath = "data/manifests/manual/manual_kfold_budget_splits/manifest_index.csv"
+        RunsRoot = "outputs/manual_kfold_budget"
+        HydraJobName = "manual_kfold_budget"
+        AggregateSource = "manual_kfold"
+        AggregateOutputPrefix = "manual_kfold_budget"
+    }
+    gpt = @{
+        ConfigName = "best_gpt_labels_config.yaml"
+        ManifestRoot = "data/manifests/gpt/gpt_kfold_budget_splits"
+        TestManifestRoot = "data/manifests/manual/manual_kfold_budget_splits"
+        ManifestIndexPath = "data/manifests/gpt/gpt_kfold_budget_splits/manifest_index.csv"
+        RunsRoot = "outputs/gpt_kfold_budget"
+        HydraJobName = "gpt_kfold_budget"
+        AggregateSource = "gpt_kfold"
+        AggregateOutputPrefix = "gpt_kfold_budget"
+    }
+}
+
+$defaults = $sourceDefaults[$LabelSource]
+if (-not $PSBoundParameters.ContainsKey("ConfigName")) { $ConfigName = $defaults.ConfigName }
+if (-not $PSBoundParameters.ContainsKey("ManifestRoot")) { $ManifestRoot = $defaults.ManifestRoot }
+if (-not $PSBoundParameters.ContainsKey("TestManifestRoot")) { $TestManifestRoot = $defaults.TestManifestRoot }
+if (-not $PSBoundParameters.ContainsKey("ManifestIndexPath")) { $ManifestIndexPath = $defaults.ManifestIndexPath }
+if (-not $PSBoundParameters.ContainsKey("RunsRoot")) { $RunsRoot = $defaults.RunsRoot }
+if (-not $PSBoundParameters.ContainsKey("HydraJobName")) { $HydraJobName = $defaults.HydraJobName }
+if (-not $PSBoundParameters.ContainsKey("AggregateSource")) { $AggregateSource = $defaults.AggregateSource }
+if (-not $PSBoundParameters.ContainsKey("AggregateOutputPrefix")) { $AggregateOutputPrefix = $defaults.AggregateOutputPrefix }
 
 if (-not (Test-Path $ManifestIndexPath)) {
     throw "Manifest index not found: $ManifestIndexPath"
@@ -26,12 +64,15 @@ $logDir = "outputs/phase3_sweep_logs"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $failureLog = Join-Path $logDir "kfold_failures_$timestamp.log"
+$defaultSeeds = @(52, 123, 456, 789, 999)
 
 $seedList = @()
 if ($PSBoundParameters.ContainsKey("Seeds")) {
     $seedList = $Seeds | Where-Object { $_ -ne $null } | ForEach-Object { [int]$_ }
-} else {
+} elseif ($PSBoundParameters.ContainsKey("Seed")) {
     $seedList = @([int]$Seed)
+} else {
+    $seedList = $defaultSeeds
 }
 
 if ($seedList.Count -eq 0) {
@@ -39,7 +80,12 @@ if ($seedList.Count -eq 0) {
 }
 
 $seedList = $seedList | Sort-Object -Unique
-Write-Host "Running Phase 3 K-fold sweep with seeds: $($seedList -join ', ')"
+Write-Host "Running Phase 3 K-fold sweep for source=$LabelSource with seeds: $($seedList -join ', ')"
+Write-Host "Config=$ConfigName"
+Write-Host "ManifestRoot=$ManifestRoot"
+Write-Host "TestManifestRoot=$TestManifestRoot"
+Write-Host "ManifestIndexPath=$ManifestIndexPath"
+Write-Host "RunsRoot=$RunsRoot"
 
 $rows = Import-Csv $ManifestIndexPath | Sort-Object @{Expression = {[int]$_.fold}}, @{Expression = {[int]$_.requested_budget}}
 
@@ -57,7 +103,7 @@ function Invoke-Phase3Run {
 
     $resolvedTrain = Join-Path $ManifestRoot $trainManifest
     $resolvedVal = Join-Path $ManifestRoot $valManifest
-    $resolvedTest = Join-Path $ManifestRoot $testManifest
+    $resolvedTest = Join-Path $TestManifestRoot $testManifest
 
     if (-not (Test-Path $resolvedTrain)) { throw "Train manifest not found: $resolvedTrain" }
     if (-not (Test-Path $resolvedVal)) { throw "Validation manifest not found: $resolvedVal" }
@@ -75,7 +121,6 @@ function Invoke-Phase3Run {
 
     $manifestRootHydra = $ManifestRoot.Replace('\\', '/')
     $runDirHydra = $runDir.Replace('\\', '/')
-
     $args = @(
         "-m", "src.classification.train",
         "--config-name", $ConfigName,
@@ -121,9 +166,10 @@ try {
         $aggregateArgs = @(
             ".\scripts\evaluate_and_aggregate_runs.py",
             "--runs-root", $RunsRoot,
-            "--test-manifest-dir", $ManifestRoot,
-            "--source", "manual_kfold",
-            "--output-prefix", "manual_kfold_budget"
+            "--test-manifest-dir", $TestManifestRoot,
+            "--fold-map-csv", $ManifestIndexPath,
+            "--source", $AggregateSource,
+            "--output-prefix", $AggregateOutputPrefix
         )
 
         & python @aggregateArgs
@@ -133,7 +179,7 @@ try {
         }
     }
 
-    Write-Host "Phase 3 K-fold sweep finished successfully."
+    Write-Host "Phase 3 K-fold sweep finished successfully for source=$LabelSource."
     exit 0
 }
 catch {

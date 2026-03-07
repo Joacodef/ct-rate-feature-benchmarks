@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -173,6 +174,89 @@ def _multilabel_grouped_kfold(
         train_groups = [str(group_names[idx]) for idx in train_idx]
         test_groups = [str(group_names[idx]) for idx in test_idx]
         folds.append((train_groups, test_groups))
+
+    return folds
+
+
+def _fixed_test_manifest_folds(
+    full_df: pd.DataFrame,
+    *,
+    fixed_test_manifests_dir: Path,
+    fixed_test_pattern: str,
+    group_column: str,
+    group_separator: str,
+    group_remove_last: bool,
+    eval_only: bool,
+) -> List[Tuple[int, str, int, List[str], List[str]]]:
+    """Build folds from pre-existing per-fold test manifests.
+
+    The function extracts grouped IDs from each provided test manifest and
+    builds fold tuples containing:
+    (fold_id, test_manifest_name, test_row_count, train_groups, test_groups).
+    """
+    if not fixed_test_manifests_dir.exists():
+        raise FileNotFoundError(
+            f"Fixed test manifest directory not found: {fixed_test_manifests_dir}"
+        )
+
+    candidates = sorted(fixed_test_manifests_dir.glob(fixed_test_pattern))
+    if not candidates:
+        raise FileNotFoundError(
+            f"No fixed test manifests found in {fixed_test_manifests_dir} "
+            f"with pattern '{fixed_test_pattern}'."
+        )
+
+    full_group_keys = _build_group_keys(
+        full_df,
+        group_column=group_column,
+        separator=group_separator,
+        remove_last=group_remove_last,
+    )
+    all_groups = set(full_group_keys.astype(str).unique().tolist())
+
+    extracted: List[Tuple[int, str, int, List[str]]] = []
+    fold_pattern = re.compile(r"_f(\d+)_test\.csv$", re.IGNORECASE)
+    for path in candidates:
+        match = fold_pattern.search(path.name)
+        if not match:
+            log.warning("Skipping fixed test manifest without fold pattern: %s", path)
+            continue
+
+        fold_id = int(match.group(1))
+        test_df = pd.read_csv(path)
+        test_keys = _build_group_keys(
+            test_df,
+            group_column=group_column,
+            separator=group_separator,
+            remove_last=group_remove_last,
+        )
+        test_groups = sorted(set(test_keys.astype(str).unique().tolist()))
+        extracted.append((fold_id, path.name, int(len(test_df)), test_groups))
+
+    if not extracted:
+        raise RuntimeError("No valid fixed test manifests could be parsed for folds.")
+
+    extracted.sort(key=lambda item: item[0])
+    folds: List[Tuple[int, str, int, List[str], List[str]]] = []
+    for fold_id, test_manifest_name, test_row_count, test_groups in extracted:
+        unknown = [g for g in test_groups if g not in all_groups]
+        if unknown and not eval_only:
+            raise ValueError(
+                f"Fixed fold {fold_id} contains groups not present in full manifest: "
+                f"{unknown[:5]}{'...' if len(unknown) > 5 else ''}"
+            )
+
+        if eval_only:
+            # In eval-only mode we allow external test folds that are outside the
+            # source manifest universe (e.g., GPT labels without manual test cases).
+            test_groups = [g for g in test_groups if g in all_groups]
+            train_groups = sorted(all_groups)
+        else:
+            train_groups = sorted(all_groups.difference(test_groups))
+
+        if not train_groups:
+            raise RuntimeError(f"Fixed fold {fold_id} produced an empty train group set.")
+        folds.append((fold_id, test_manifest_name, test_row_count, train_groups, test_groups))
 
     return folds
 
@@ -402,6 +486,30 @@ def _parse_args() -> argparse.Namespace:
         dest="group_remove_last",
         help="Keep full group IDs without dropping the final token.",
     )
+    parser.add_argument(
+        "--fixed-test-manifests-dir",
+        type=str,
+        default=None,
+        help=(
+            "Optional directory with existing per-fold test manifests to reuse "
+            "(for strict fold alignment across sources)."
+        ),
+    )
+    parser.add_argument(
+        "--fixed-test-pattern",
+        type=str,
+        default="*_f*_test.csv",
+        help="Glob pattern for fixed fold test manifests (default: *_f*_test.csv).",
+    )
+    parser.add_argument(
+        "--fixed-test-eval-only",
+        action="store_true",
+        default=False,
+        help=(
+            "Use fixed test manifests as external evaluation references only: "
+            "do not carve fold test rows from the source full manifest."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -437,7 +545,34 @@ def main() -> None:
     )
     grouped_labels = _group_label_frame(full_df, group_keys, context.target_labels)
 
-    folds = _multilabel_grouped_kfold(grouped_labels, k_folds=args.k_folds, seed=args.seed)
+    fixed_test_meta: Optional[dict] = None
+    if args.fixed_test_manifests_dir:
+        fixed_folds = _fixed_test_manifest_folds(
+            full_df,
+            fixed_test_manifests_dir=Path(args.fixed_test_manifests_dir),
+            fixed_test_pattern=args.fixed_test_pattern,
+            group_column=args.group_column,
+            group_separator=args.group_separator,
+            group_remove_last=bool(args.group_remove_last),
+            eval_only=bool(args.fixed_test_eval_only),
+        )
+        if args.k_folds != len(fixed_folds):
+            raise ValueError(
+                f"--k-folds={args.k_folds} but fixed test manifests define {len(fixed_folds)} folds."
+            )
+        folds = [(train_groups, test_groups) for _, _, _, train_groups, test_groups in fixed_folds]
+        fixed_test_meta = {
+            int(fold_id): {"name": test_name, "rows": int(test_rows)}
+            for fold_id, test_name, test_rows, _, _ in fixed_folds
+        }
+        log.info(
+            "Using fixed test manifests from %s (pattern=%s, eval_only=%s) for fold assignment.",
+            args.fixed_test_manifests_dir,
+            args.fixed_test_pattern,
+            bool(args.fixed_test_eval_only),
+        )
+    else:
+        folds = _multilabel_grouped_kfold(grouped_labels, k_folds=args.k_folds, seed=args.seed)
 
     output_dir = context.manifest_dir / args.output_subdir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -451,13 +586,20 @@ def main() -> None:
         fold_train_pool = full_df.loc[fold_train_mask].copy().sort_index()
         fold_test_df = full_df.loc[fold_test_mask].copy().sort_index()
 
-        if len(fold_train_pool) == 0 or len(fold_test_df) == 0:
-            raise RuntimeError(
-                f"Fold {fold_idx} produced an empty train or test partition."
-            )
+        if len(fold_train_pool) == 0:
+            raise RuntimeError(f"Fold {fold_idx} produced an empty train partition.")
 
-        test_manifest_name = f"{args.prefix}_f{fold_idx}_test.csv"
-        _write_csv(output_dir / test_manifest_name, fold_test_df)
+        if fixed_test_meta and bool(args.fixed_test_eval_only):
+            if fold_idx not in fixed_test_meta:
+                raise RuntimeError(f"Missing fixed test metadata for fold {fold_idx}.")
+            test_manifest_name = str(fixed_test_meta[fold_idx]["name"])
+            fold_test_rows = int(fixed_test_meta[fold_idx]["rows"])
+        else:
+            if len(fold_test_df) == 0:
+                raise RuntimeError(f"Fold {fold_idx} produced an empty test partition.")
+            test_manifest_name = f"{args.prefix}_f{fold_idx}_test.csv"
+            fold_test_rows = int(len(fold_test_df))
+            _write_csv(output_dir / test_manifest_name, fold_test_df)
 
         for budget in budgets:
             effective_budget = min(int(budget), len(fold_train_pool))
@@ -504,10 +646,10 @@ def main() -> None:
                     "requested_budget": int(budget),
                     "effective_budget": int(effective_budget),
                     "fold_train_pool_rows": int(len(fold_train_pool)),
-                    "fold_test_rows": int(len(fold_test_df)),
+                    "fold_test_rows": int(fold_test_rows),
                     "train_rows": int(len(train_df)),
                     "val_rows": int(len(val_df)),
-                    "test_rows": int(len(fold_test_df)),
+                    "test_rows": int(fold_test_rows),
                     "train_manifest": train_manifest_name,
                     "val_manifest": val_manifest_name,
                     "test_manifest": test_manifest_name,
@@ -521,7 +663,7 @@ def main() -> None:
                 effective_budget,
                 len(train_df),
                 len(val_df),
-                len(fold_test_df),
+                fold_test_rows,
             )
 
     index_path = output_dir / "manifest_index.csv"

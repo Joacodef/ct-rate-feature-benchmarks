@@ -154,21 +154,40 @@ Runs one deterministic training job per `(fold, budget)` from the generated Phas
 
 * Reads `manifest_index.csv` from the K-fold generator output.
 * Trains with fixed seed (`utils.seed`) and fold-specific train/val manifests.
-* Stores one run folder per fold-budget pair under `outputs/manual_kfold_budget`.
+* Supports `-LabelSource manual|gpt` with source-specific defaults for config, manifest paths, run outputs, and aggregation labels.
+* Stores one run folder per fold-budget pair under source-specific runs roots.
 * By default runs `evaluate_and_aggregate_runs.py` at the end.
 
-Example:
+Manual example:
 
 ```powershell
-.\scripts\run_phase3_manual_kfold_sweep.ps1 -ConfigName best_manual_labels_config.yaml -ManifestRoot data/manifests/manual/manual_kfold_budget_splits -ManifestIndexPath data/manifests/manual/manual_kfold_budget_splits/manifest_index.csv -Seed 52
+.\scripts\run_phase3_manual_kfold_sweep.ps1 -LabelSource manual -Seeds 52,123,456,789,999 -StopOnError
 
 ```
+
+GPT example:
+
+```powershell
+.\scripts\run_phase3_manual_kfold_sweep.ps1 -LabelSource gpt -Seeds 52,123,456,789,999 -StopOnError
+
+```
+
+Default seeds example (no `-Seed`/`-Seeds` passed):
+
+```powershell
+.\scripts\run_phase3_manual_kfold_sweep.ps1 -LabelSource gpt -StopOnError
+
+```
+
+This automatically runs the Phase 3 seed set: `52,123,456,789,999`.
 
 Options:
 
 * `-Force`: retrain completed runs.
 * `-StopOnError`: stop immediately on first failed run.
 * `-SkipAggregate`: skip final aggregate evaluation.
+* Seed precedence: `-Seeds` (list) > `-Seed` (single) > built-in default five seeds.
+* Any default can still be overridden explicitly, e.g. `-ManifestRoot` or `-ConfigName`.
 
 ## evaluate_and_aggregate_runs.py
 
