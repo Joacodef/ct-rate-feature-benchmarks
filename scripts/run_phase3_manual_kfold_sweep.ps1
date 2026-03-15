@@ -9,6 +9,7 @@ param(
     [string]$HydraJobName,
     [string]$AggregateSource,
     [string]$AggregateOutputPrefix,
+    [string]$PythonExe,
     [int]$Seed,
     [int[]]$Seeds,
     [switch]$Force,
@@ -39,6 +40,38 @@ $sourceDefaults = @{
         AggregateSource = "gpt_kfold"
         AggregateOutputPrefix = "gpt_kfold_budget"
     }
+}
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
+
+if (-not $PSBoundParameters.ContainsKey("PythonExe")) {
+    $venvPython = Join-Path $projectRoot ".venv\Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        $PythonExe = $venvPython
+    } else {
+        $PythonExe = "python"
+    }
+}
+
+if ($PythonExe -eq "python") {
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pythonCmd) {
+        throw "Python executable not found. Pass -PythonExe <path-to-python.exe>."
+    }
+} elseif (-not (Test-Path $PythonExe)) {
+    throw "Python executable not found: $PythonExe"
+}
+
+$srcPath = Join-Path $projectRoot "src"
+if (-not (Test-Path $srcPath)) {
+    throw "Source path not found: $srcPath"
+}
+
+if ([string]::IsNullOrWhiteSpace($env:PYTHONPATH)) {
+    $env:PYTHONPATH = $srcPath
+} elseif (-not ($env:PYTHONPATH.Split(';') -contains $srcPath)) {
+    $env:PYTHONPATH = "$srcPath;$($env:PYTHONPATH)"
 }
 
 $defaults = $sourceDefaults[$LabelSource]
@@ -86,6 +119,8 @@ Write-Host "ManifestRoot=$ManifestRoot"
 Write-Host "TestManifestRoot=$TestManifestRoot"
 Write-Host "ManifestIndexPath=$ManifestIndexPath"
 Write-Host "RunsRoot=$RunsRoot"
+Write-Host "PythonExe=$PythonExe"
+Write-Host "PYTHONPATH=$($env:PYTHONPATH)"
 
 $rows = Import-Csv $ManifestIndexPath | Sort-Object @{Expression = {[int]$_.fold}}, @{Expression = {[int]$_.requested_budget}}
 
@@ -134,7 +169,7 @@ function Invoke-Phase3Run {
         "utils.seed=$RunSeed"
     )
 
-    & python @args
+    & $PythonExe @args
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -ne 0) {
@@ -172,7 +207,7 @@ try {
             "--output-prefix", $AggregateOutputPrefix
         )
 
-        & python @aggregateArgs
+        & $PythonExe @aggregateArgs
         $aggregateExit = $LASTEXITCODE
         if ($aggregateExit -ne 0) {
             throw "Aggregation failed with exit code $aggregateExit."

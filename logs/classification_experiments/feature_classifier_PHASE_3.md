@@ -7,7 +7,7 @@ Establish a conclusive comparison between manual and GPT labels on shared budget
 - Primary protocol: 5-fold cross-validation for both label sources.
 - Seed policy: 5 seeds per fold for both label sources.
 - Shared budgets for fair comparison: 20, 50, 100, 250, 500, 800, 1191, 1520.
-- GPT-only asymptotic budgets: 2000, 5000, 10000.
+- GPT-only asymptotic budgets: 2000, 5000, 10000, 20000, 46438.
 - Evaluation endpoint: fold hold-out test manifests only.
 - Final headline metrics per budget: mean +- std across all fold-seed runs (n = 5 x 5 = 25).
 
@@ -24,7 +24,7 @@ Establish a conclusive comparison between manual and GPT labels on shared budget
   - Budgets: 20, 50, 100, 250, 500, 800, 1191, 1520.
 - GPT manifests:
   - Source full manifest: `data/manifests/gpt/all.csv`.
-  - Budgets: 20, 50, 100, 250, 500, 800, 1191, 1520, 2000, 5000, 10000.
+  - Budgets: 20, 50, 100, 250, 500, 800, 1191, 1520, 2000, 5000, 10000, 20000, 46438.
   - Output subdir: `gpt_kfold_budget_splits`.
   - Prefix: `gpt_kfold`.
 
@@ -41,8 +41,8 @@ Establish a conclusive comparison between manual and GPT labels on shared budget
 - Seeds: 52, 123, 456, 789, 999.
 - Expected runs:
   - Shared budgets: 5 folds x 8 budgets x 5 seeds = 200 runs.
-  - GPT-only budgets: 5 folds x 3 budgets x 5 seeds = 75 runs.
-  - Total GPT runs: 275.
+  - GPT-only budgets: 5 folds x 5 budgets x 5 seeds = 125 runs.
+  - Total GPT runs: 325.
 - Requirement: use the same K-fold manifest-generation logic and sampling seed policy as manual.
 
 ## Item 4 - Aggregation and Reporting
@@ -116,10 +116,12 @@ Across the shared data budget regimes, models trained on GPT labels effectively 
 * At the lowest budgets (e.g., $N=50$), manual labels showed a slight edge, yielding an AUPRC of $0.507 \pm 0.028$ and AUROC of $0.679 \pm 0.019$, compared to the GPT labels' AUPRC of $0.489 \pm 0.028$ and AUROC of $0.655 \pm 0.025$.
 * From $N=100$ onwards, GPT labels demonstrated strong sample efficiency. By the maximum shared budget of $N=1520$, manual models reached an AUPRC of $0.526 \pm 0.021$ and AUROC of $0.691 \pm 0.020$, whereas GPT models exceeded this with an AUPRC of $0.539 \pm 0.024$ and AUROC of $0.709 \pm 0.025$.
 
-#### Asymptotic Regimes (GPT-only, $N=2000$ to $10000$)
+#### Asymptotic Regimes (GPT-only, $N=2000$ to $46438$)
 Scaling the GPT-derived labels to larger budgets yielded continuous but diminishing returns, indicating a plateau effect.
 * At $N=5000$, GPT models achieved an AUPRC of $0.562 \pm 0.027$ and AUROC of $0.724 \pm 0.024$.
-* At the maximum budget of $N=10000$, GPT models achieved the highest overall performance with an AUPRC of $0.568 \pm 0.029$, an AUROC of $0.731 \pm 0.025$, and a Macro-F1 of $0.574 \pm 0.023$.
+* At $N=10000$, GPT models achieved peak AUPRC and AUROC with $0.568 \pm 0.029$ and $0.731 \pm 0.025$, respectively.
+* At $N=20000$, Macro-F1 reached its maximum at $0.575 \pm 0.026$ while AUPRC/AUROC remained near-peak ($0.567 \pm 0.026$, $0.728 \pm 0.025$).
+* At the maximum budget of $N=46438$, performance remained on the same plateau (AUPRC $0.566 \pm 0.028$, AUROC $0.728 \pm 0.026$, Macro-F1 $0.573 \pm 0.026$).
 
 ### Item 5 - Per-Class Analysis
 
@@ -150,9 +152,9 @@ All highlighted significant findings also satisfy the CI-based decision rule (95
 
 Based on the robust 5-fold, 5-seed evaluation protocol (aggregating $n=25$ runs per budget), we reach the following conclusions regarding our initial hypotheses:
 
-1. **Hypothesis 1 (Supported):** Representation bottleneck remains the dominant limiting factor under frozen features. Even at a training budget of $10000$ samples, absolute performance plateaus at an AUPRC of $\sim 0.57$ and AUROC of $\sim 0.73$. This asymptotic behavior indicates that the frozen feature space fundamentally restricts the linear separability of the pathology classes.
+1. **Hypothesis 1 (Supported):** Representation bottleneck remains the dominant limiting factor under frozen features. Even when scaling GPT labels up to $N=46438$, absolute performance remains on a plateau around AUPRC $\sim 0.57$, AUROC $\sim 0.73$, and Macro-F1 $\sim 0.57$. This asymptotic behavior indicates that the frozen feature space fundamentally restricts the linear separability of the pathology classes.
 2. **Hypothesis 2 (Rejected):** Manual labels are *not* universally more sample-efficient at shared budgets. Statistical inference confirms that manual labels show a significant advantage only at a very low data regime ($N=50$), while GPT labels show significant advantages in several metric-budget pairs from $N=100$ onward and especially across higher shared budgets ($N=500$ to $1520$). This suggests that the signal provided by the LLM-extracted labels is often more consistent and better aligned with the frozen feature representations once a minimal data threshold is crossed.
-3. **Hypothesis 3 (Supported):** GPT labels approach and exceed manual annotations in asymptotic regimes. The ability to scale GPT labels cost-effectively to $10000$ samples allowed the models to significantly surpass the maximum performance achievable with the completely exhausted manual dataset at $N=1520$.
+3. **Hypothesis 3 (Supported):** GPT labels approach and exceed manual annotations in asymptotic regimes. Scaling GPT labels cost-effectively through $N=46438$ sustained clear gains over the fully exhausted manual dataset at $N=1520$, while also confirming a high-budget performance plateau.
 
 
 ### About Per-Class Evaluation

@@ -4,6 +4,8 @@
 
 Under frozen precomputed CT-CLIP features, final confirmatory evidence from Phase 3 (5-fold x 5-seed protocol with paired inference) indicates that GPT-label training is competitive and often superior to manual-label training across shared budgets from $N \ge 100$, with the strongest and most consistent gains in AUPRC/AUROC at higher shared budgets. Manual labels retain an advantage in selected low-budget regimes (notably $N=50$ for AUROC and F1-macro).
 
+In the GPT-only asymptotic extension ($N=2000,5000,10000,20000,46438$), performance improves quickly and then plateaus: peak AUPRC/AUROC occur at $N=10000$ ($0.568 \pm 0.029$, $0.731 \pm 0.025$), peak Macro-F1 occurs at $N=20000$ ($0.575 \pm 0.026$), and $N=46438$ remains on the same plateau (AUPRC $0.566 \pm 0.028$, AUROC $0.728 \pm 0.026$, Macro-F1 $0.573 \pm 0.026$).
+
 The apparent contradiction with Phase 2 is explained by protocol differences: Phase 2 uses a fixed test endpoint, while Phase 3 estimates performance over fold hold-outs and explicitly models uncertainty with paired CI and FDR-corrected tests.
 
 ## 2) Protocol Sensitivity (Required Stress Test)
@@ -106,7 +108,7 @@ Impact categories follow the study plan decision framework.
 - Effect: materially shifts crossover location and asymptotic relative standing.
 
 3. **Representation bottleneck (A): Medium impact**
-- Evidence: absolute ceilings remain moderate even at high budgets (AUPRC ~0.57, AUROC ~0.73), indicating frozen-feature limits.
+- Evidence: absolute ceilings remain moderate even when scaling to $N=46438$ (AUPRC ~0.57, AUROC ~0.73, Macro-F1 ~0.57), indicating frozen-feature limits.
 - Effect: constrains both sources; does not alone determine GPT-vs-manual ranking.
 
 4. **Optimization/threshold bottleneck (D): Low-to-Medium impact (not primary)**
